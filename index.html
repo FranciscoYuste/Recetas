@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Recetario Digital</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+
+<body>
+    <header>
+        <h1>📖 Recetario Digital</h1>
+        <div class="search-container">
+            <input type="text" id="searchInput" placeholder="🔍 Buscar receta o ingrediente...">
+        </div>
+        <nav class="categories-bar" id="categoryFilters">
+            <button class="active" data-cat="Todas">Todas</button>
+            <button data-cat="Carnes">🥩 Carnes</button>
+            <button data-cat="Pescados y Mariscos">🐟 Pescados</button>
+            <button data-cat="Pastas">🍝 Pastas</button>
+            <button data-cat="Ensaladas">🥗 Ensaladas</button>
+            <button data-cat="Sopas y Cremas">🍲 Sopas y Cremas</button>
+            <button data-cat="Postres">🍰 Postres</button>
+        </nav>
+    </header>
+
+    <main class="main-layout">
+        <section class="recipes-grid" id="recipesGrid"></section>
+
+        <aside class="shopping-sidebar">
+            <h2>🛒 Lista de la Compra</h2>
+            <ul id="shoppingList"></ul>
+            <button id="clearListBtn" class="btn-clear">Vaciar Lista</button>
+        </aside>
+    </main>
+
+    <!-- Modal para ver la receta completa -->
+    <div id="recipeModal" class="modal">
+        <div class="modal-content">
+            <span class="close-btn" id="closeModal">&times;</span>
+            <h2 id="modalTitle"></h2>
+            <p><span id="modalCategory" class="badge"></span></p>
+            <h3>Ingredientes</h3>
+            <ul id="modalIngredients"></ul>
+            <h3>Pasos de Preparación</h3>
+            <div id="modalSteps"></div>
+            <p id="modalUrlWrapper" style="margin-top: 15px;"></p>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+
+</html>
