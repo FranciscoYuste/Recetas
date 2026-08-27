@@ -59,8 +59,7 @@ function renderRecipes() {
             categoryMatch = r.categoria === currentCategory;
         }
 
-        const matchQuery = r.titulo.toLowerCase().includes(query) ||
-            r.ingredientes.some(i => i.toLowerCase().includes(query));
+        const matchQuery = r.titulo.toLowerCase().includes(query);
         return categoryMatch && matchQuery;
     });
 
