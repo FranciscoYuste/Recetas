@@ -39,6 +39,13 @@
         <div class="modal-content">
             <span class="close-btn" id="closeShoppingModal">&times;</span>
             <h2>🛒 Lista de la Compra</h2>
+            
+            <!-- Campo para añadir productos manualmente -->
+            <div class="add-item-container">
+                <input type="text" id="newShoppingItem" placeholder="Añadir producto manualmente...">
+                <button id="addShoppingItemBtn" class="btn btn-primary">+</button>
+            </div>
+
             <ul id="shoppingList" class="shopping-list"></ul>
             <button id="clearListBtn" class="btn-clear">Vaciar Lista</button>
         </div>
