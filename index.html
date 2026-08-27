@@ -40,10 +40,16 @@
             <span class="close-btn" id="closeShoppingModal">&times;</span>
             <h2>🛒 Lista de la Compra</h2>
 
-            <!-- Campo para añadir productos manualmente -->
-            <div class="add-item-container">
-                <input type="text" id="newShoppingItem" placeholder="Añadir producto manualmente...">
-                <button id="addShoppingItemBtn" class="btn btn-primary">+</button>
+            <div class="shopping-search-container">
+                <label for="shoppingSearchInput">Buscar producto</label>
+                <input type="search" id="shoppingSearchInput" placeholder="Ej.: tomates, leche..." autocomplete="off">
+                <div id="shoppingSearchResults" class="shopping-search-results"></div>
+            </div>
+
+            <div id="quantityContainer" class="quantity-container" hidden>
+                <span id="selectedProductName"></span>
+                <input type="number" id="shoppingQuantity" min="1" step="1" value="1" aria-label="Cantidad">
+                <button id="addShoppingItemBtn" class="btn btn-primary">Añadir</button>
             </div>
 
             <ul id="shoppingList" class="shopping-list"></ul>

@@ -25,7 +25,8 @@ header {
     padding: 12px 20px;
     border: 2px solid #ddd;
     border-radius: 25px;
-    font-size: 16px; /* Evita zoom automático en iOS */
+    font-size: 16px;
+    /* Evita zoom automático en iOS */
     outline: none;
     transition: border-color 0.3s;
     box-sizing: border-box;
@@ -79,7 +80,7 @@ header {
     background: var(--card-bg);
     border-radius: 12px;
     padding: 18px;
-    box-shadow: 0 4px 10px rgba(0,0,0,0.05);
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.05);
     display: flex;
     flex-direction: column;
     justify-content: space-between;
@@ -115,9 +116,19 @@ header {
     text-align: center;
 }
 
-.btn-primary { background: var(--primary); color: white; }
-.btn-primary:hover { background: var(--primary-hover); }
-.btn-secondary { background: #edf2f7; color: var(--text); }
+.btn-primary {
+    background: var(--primary);
+    color: white;
+}
+
+.btn-primary:hover {
+    background: var(--primary-hover);
+}
+
+.btn-secondary {
+    background: #edf2f7;
+    color: var(--text);
+}
 
 /* Botón Flotante para la Lista */
 .floating-shopping-btn {
@@ -131,35 +142,76 @@ header {
     border-radius: 30px;
     font-weight: bold;
     font-size: 1rem;
-    box-shadow: 0 4px 15px rgba(0,0,0,0.25);
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.25);
     cursor: pointer;
     z-index: 900;
 }
 
 /* Modal y Elementos de la Lista */
-.add-item-container {
-    display: flex;
-    gap: 10px;
-    margin: 15px 0;
+.shopping-search-container {
+    margin: 15px 0 10px;
 }
 
-.add-item-container input {
-    flex-grow: 1;
+.shopping-search-container label {
+    display: block;
+    font-weight: bold;
+    margin-bottom: 7px;
+}
+
+.shopping-search-container input {
+    width: 100%;
     padding: 10px;
     border: 1px solid #ddd;
     border-radius: 6px;
     font-size: 16px;
     outline: none;
+    box-sizing: border-box;
 }
 
-.add-item-container input:focus {
+.shopping-search-container input:focus {
     border-color: var(--primary);
 }
 
-.add-item-container button {
-    flex: 0 0 auto;
-    font-size: 1.2rem;
-    padding: 0 15px;
+.shopping-search-results {
+    display: grid;
+    gap: 5px;
+    margin-top: 8px;
+    max-height: 180px;
+    overflow-y: auto;
+}
+
+.product-result {
+    padding: 9px 10px;
+    border: 1px solid #edf2f7;
+    background: #f8fafc;
+    border-radius: 6px;
+    color: var(--text);
+    text-align: left;
+    cursor: pointer;
+}
+
+.product-result:hover {
+    border-color: var(--primary);
+}
+
+.quantity-container {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 12px 0;
+}
+
+.quantity-container span {
+    flex: 1;
+    font-weight: bold;
+}
+
+.quantity-container input {
+    width: 70px;
+    padding: 9px;
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    font-size: 16px;
 }
 
 .shopping-list {
@@ -170,10 +222,29 @@ header {
 
 .shopping-list li {
     display: flex;
-    justify-content: space-between;
     align-items: center;
+    gap: 10px;
     padding: 10px 0;
     border-bottom: 1px solid #edf2f7;
+}
+
+.shopping-list li>span:first-child {
+    flex: 1;
+}
+
+.shopping-item-quantity {
+    min-width: 28px;
+    font-weight: bold;
+    text-align: center;
+}
+
+.remove-item-btn {
+    padding: 6px 9px;
+    border: 1px solid #e74c3c;
+    border-radius: 5px;
+    background: white;
+    color: #c0392b;
+    cursor: pointer;
 }
 
 .btn-clear {
@@ -191,8 +262,11 @@ header {
 .modal {
     display: none;
     position: fixed;
-    top: 0; left: 0; width: 100%; height: 100%;
-    background: rgba(0,0,0,0.5);
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.5);
     justify-content: center;
     align-items: center;
     padding: 15px;
@@ -214,14 +288,17 @@ header {
 
 .close-btn {
     position: absolute;
-    top: 15px; right: 20px;
+    top: 15px;
+    right: 20px;
     font-size: 1.5rem;
     cursor: pointer;
 }
 
 /* Pantallas grandes (Escritorio / Tablet desde 768px) */
 @media (min-width: 768px) {
-    body { padding: 20px; }
+    body {
+        padding: 20px;
+    }
 
     .categories-bar {
         justify-content: center;

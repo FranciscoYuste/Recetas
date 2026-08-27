@@ -1,11 +1,24 @@
 let recipes = [];
+let products = [];
 let currentCategory = 'Todas';
-let shoppingList = JSON.parse(localStorage.getItem('shoppingList')) || [];
+let shoppingList = (JSON.parse(localStorage.getItem('shoppingList')) || [])
+    .filter(item => item && item.nombre)
+    .map(item => ({
+        productId: item.productId || item.nombre.toLowerCase(),
+        nombre: item.nombre,
+        cantidad: Number.isInteger(item.cantidad) && item.cantidad > 0 ? item.cantidad : 1
+    }));
+let selectedProduct = null;
 
 document.addEventListener('DOMContentLoaded', async () => {
     try {
-        const response = await fetch('recetas_final.json');
-        recipes = await response.json();
+        const [recipesResponse, productsResponse] = await Promise.all([
+            fetch('recetas_final.json'),
+            fetch('productos.json')
+        ]);
+        recipes = await recipesResponse.json();
+        const productsData = await productsResponse.json();
+        products = Array.isArray(productsData) ? productsData : productsData.productos || [];
         renderRecipes();
         renderShoppingList();
     } catch (e) {
@@ -25,6 +38,14 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Filtro por Buscador
     document.getElementById('searchInput').addEventListener('input', renderRecipes);
 
+    document.getElementById('openShoppingBtn').onclick = openShoppingModal;
+    document.getElementById('closeShoppingModal').onclick = closeShoppingModal;
+    document.getElementById('shoppingSearchInput').addEventListener('input', renderProductResults);
+    document.getElementById('addShoppingItemBtn').onclick = addSelectedProduct;
+    document.getElementById('shoppingQuantity').addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') addSelectedProduct();
+    });
+
     // Modal Events
     document.getElementById('closeModal').onclick = () => {
         document.getElementById('recipeModal').style.display = 'none';
@@ -34,6 +55,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (e.target === document.getElementById('recipeModal')) {
             document.getElementById('recipeModal').style.display = 'none';
         }
+        if (e.target === document.getElementById('shoppingModal')) closeShoppingModal();
     };
 
     document.getElementById('clearListBtn').onclick = () => {
@@ -71,7 +93,6 @@ function renderRecipes() {
             </div>
             <div class="card-actions">
                 <button class="btn btn-primary" onclick="openModal('${r.id}')">📖 Ver Receta</button>
-                <button class="btn btn-secondary" onclick="addIngredientsToCart('${r.id}')">🛒 + Compra</button>
             </div>
         </div>
     `).join('');
@@ -99,21 +120,58 @@ function openModal(id) {
     document.getElementById('recipeModal').style.display = 'flex';
 }
 
-function addIngredientsToCart(id) {
-    const r = recipes.find(item => String(item.id) === String(id));
-    if (!r) return;
-
-    r.ingredientes.forEach(ing => {
-        if (!shoppingList.some(item => item.nombre === ing)) {
-            shoppingList.push({ nombre: ing, completado: false });
-        }
-    });
-    saveShoppingList();
+function openShoppingModal() {
+    document.getElementById('shoppingModal').style.display = 'flex';
+    document.getElementById('shoppingSearchInput').focus();
+    renderProductResults();
 }
 
-function toggleItem(index) {
-    shoppingList[index].completado = !shoppingList[index].completado;
+function closeShoppingModal() {
+    document.getElementById('shoppingModal').style.display = 'none';
+    clearProductSelection();
+}
+
+function renderProductResults() {
+    const query = normalizeText(document.getElementById('shoppingSearchInput').value);
+    const results = products
+        .filter(product => normalizeText(product.nombre).includes(query))
+        .slice(0, 12);
+    const resultsEl = document.getElementById('shoppingSearchResults');
+    resultsEl.innerHTML = results.map(product => `
+        <button class="product-result" type="button" data-product-id="${product.id}">${product.nombre}</button>
+    `).join('');
+    resultsEl.querySelectorAll('.product-result').forEach(button => {
+        button.onclick = () => selectProduct(button.dataset.productId);
+    });
+}
+
+function selectProduct(id) {
+    selectedProduct = products.find(product => String(product.id) === String(id));
+    if (!selectedProduct) return;
+    document.getElementById('selectedProductName').textContent = selectedProduct.nombre;
+    document.getElementById('quantityContainer').hidden = false;
+    document.getElementById('shoppingQuantity').focus();
+    document.getElementById('shoppingQuantity').select();
+}
+
+function clearProductSelection() {
+    selectedProduct = null;
+    document.getElementById('quantityContainer').hidden = true;
+    document.getElementById('shoppingQuantity').value = 1;
+}
+
+function addSelectedProduct() {
+    const quantity = Number(document.getElementById('shoppingQuantity').value);
+    if (!selectedProduct || !Number.isInteger(quantity) || quantity < 1) return;
+
+    const existingItem = shoppingList.find(item => item.productId === selectedProduct.id);
+    if (existingItem) {
+        existingItem.cantidad += quantity;
+    } else {
+        shoppingList.push({ productId: selectedProduct.id, nombre: selectedProduct.nombre, cantidad: quantity });
+    }
     saveShoppingList();
+    clearProductSelection();
 }
 
 function removeItem(index) {
@@ -128,12 +186,19 @@ function saveShoppingList() {
 
 function renderShoppingList() {
     const listEl = document.getElementById('shoppingList');
+    document.getElementById('cartCount').textContent = shoppingList.length;
     listEl.innerHTML = shoppingList.map((item, index) => `
-        <li class="${item.completado ? 'completed' : ''}">
-            <span onclick="toggleItem(${index})" style="cursor: pointer; flex-grow: 1;">
-                ${item.completado ? '✔️' : '⚪'} ${item.nombre}
-            </span>
-            <button onclick="removeItem(${index})" style="background:none; border:none; color:red; cursor:pointer;">❌</button>
+        <li>
+            <span>${item.nombre}</span>
+            <span class="shopping-item-quantity">${item.cantidad}</span>
+            <button class="remove-item-btn" onclick="removeItem(${index})">Quitar</button>
         </li>
     `).join('');
+}
+
+function normalizeText(text) {
+    return String(text)
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '');
 }
