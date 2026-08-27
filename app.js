@@ -1,13 +1,10 @@
 let recipes = [];
 let products = [];
 let currentCategory = 'Todas';
-let shoppingList = (JSON.parse(localStorage.getItem('shoppingList')) || [])
-    .filter(item => item && item.nombre)
-    .map(item => ({
-        productId: item.productId || item.nombre.toLowerCase(),
-        nombre: item.nombre,
-        cantidad: Number.isInteger(item.cantidad) && item.cantidad > 0 ? item.cantidad : 1
-    }));
+const SUPABASE_URL = 'https://vvhkuuuwpfbyqpthetos.supabase.co';
+const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_KKUvsjeLk_gGNfOpdcg9aQ_4R0NTNyV';
+const SHOPPING_TABLE = 'ListaCompra';
+let shoppingList = [];
 let selectedProduct = null;
 
 document.addEventListener('DOMContentLoaded', async () => {
@@ -19,10 +16,11 @@ document.addEventListener('DOMContentLoaded', async () => {
         recipes = await recipesResponse.json();
         const productsData = await productsResponse.json();
         products = Array.isArray(productsData) ? productsData : productsData.productos || [];
+        await loadShoppingList();
         renderRecipes();
-        renderShoppingList();
     } catch (e) {
         console.error("Error cargando recetas:", e);
+        showShoppingError(e);
     }
 
     // Filtros por Categoría
@@ -41,9 +39,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.getElementById('openShoppingBtn').onclick = openShoppingModal;
     document.getElementById('closeShoppingModal').onclick = closeShoppingModal;
     document.getElementById('shoppingSearchInput').addEventListener('input', renderProductResults);
-    document.getElementById('addShoppingItemBtn').onclick = addSelectedProduct;
+    document.getElementById('addShoppingItemBtn').onclick = () => {
+        addSelectedProduct().catch(showShoppingError);
+    };
     document.getElementById('shoppingQuantity').addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') addSelectedProduct();
+        if (e.key === 'Enter') addSelectedProduct().catch(showShoppingError);
     });
 
     // Modal Events
@@ -59,8 +59,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     };
 
     document.getElementById('clearListBtn').onclick = () => {
-        shoppingList = [];
-        saveShoppingList();
+        clearShoppingList().catch(showShoppingError);
     };
 });
 
@@ -160,28 +159,93 @@ function clearProductSelection() {
     document.getElementById('shoppingQuantity').value = 1;
 }
 
-function addSelectedProduct() {
+async function addSelectedProduct() {
     const quantity = Number(document.getElementById('shoppingQuantity').value);
     if (!selectedProduct || !Number.isInteger(quantity) || quantity < 1) return;
 
-    const existingItem = shoppingList.find(item => item.productId === selectedProduct.id);
+    const existingItem = shoppingList.find(item => item.producto === selectedProduct.nombre);
     if (existingItem) {
         existingItem.cantidad += quantity;
+        await updateShoppingItem(existingItem);
     } else {
-        shoppingList.push({ productId: selectedProduct.id, nombre: selectedProduct.nombre, cantidad: quantity });
+        await addShoppingItem({ producto: selectedProduct.nombre, cantidad: quantity });
     }
-    saveShoppingList();
     clearProductSelection();
 }
 
 function removeItem(index) {
-    shoppingList.splice(index, 1);
-    saveShoppingList();
+    const item = shoppingList[index];
+    if (item) removeShoppingItem(item).catch(showShoppingError);
 }
 
-function saveShoppingList() {
-    localStorage.setItem('shoppingList', JSON.stringify(shoppingList));
+async function loadShoppingList() {
+    const response = await supabaseRequest('?select=id,producto,cantidad&order=id');
+    const data = await response.json();
+    shoppingList = data.map(item => ({
+        id: item.id,
+        producto: item.producto,
+        cantidad: Number.isInteger(item.cantidad) && item.cantidad > 0 ? item.cantidad : 1
+    }));
     renderShoppingList();
+    setShoppingStatus('Lista actualizada');
+}
+
+async function addShoppingItem(item) {
+    await supabaseRequest('', {
+        method: 'POST',
+        body: JSON.stringify(item)
+    });
+    await loadShoppingList();
+}
+
+async function updateShoppingItem(item) {
+    await supabaseRequest(`?id=eq.${encodeURIComponent(item.id)}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ cantidad: item.cantidad })
+    });
+    await loadShoppingList();
+}
+
+async function removeShoppingItem(item) {
+    await supabaseRequest(`?id=eq.${encodeURIComponent(item.id)}`, { method: 'DELETE' });
+    await loadShoppingList();
+}
+
+async function clearShoppingList() {
+    await supabaseRequest('?id=not.is.null', { method: 'DELETE' });
+    await loadShoppingList();
+}
+
+function showShoppingError(error) {
+    console.error('Error en la lista de compra:', error);
+    setShoppingStatus(`Error: ${error.message}`, true);
+}
+
+function setShoppingStatus(message, isError = false) {
+    const statusEl = document.getElementById('shoppingStatus');
+    if (!statusEl) return;
+    statusEl.textContent = message;
+    statusEl.classList.toggle('shopping-status-error', isError);
+}
+
+async function supabaseRequest(query = '', options = {}) {
+    if (SUPABASE_PUBLISHABLE_KEY === 'PEGA_AQUI_TU_PUBLISHABLE_KEY') {
+        throw new Error('Falta configurar la publishable key de Supabase en app.js');
+    }
+
+    const response = await fetch(`${SUPABASE_URL}/rest/v1/${SHOPPING_TABLE}${query}`, {
+        ...options,
+        headers: {
+            apikey: SUPABASE_PUBLISHABLE_KEY,
+            Authorization: `Bearer ${SUPABASE_PUBLISHABLE_KEY}`,
+            'Content-Type': 'application/json',
+            ...options.headers
+        }
+    });
+    if (!response.ok) {
+        throw new Error(`Supabase respondió con ${response.status}: ${await response.text()}`);
+    }
+    return response;
 }
 
 function renderShoppingList() {
@@ -189,7 +253,7 @@ function renderShoppingList() {
     document.getElementById('cartCount').textContent = shoppingList.length;
     listEl.innerHTML = shoppingList.map((item, index) => `
         <li>
-            <span>${item.nombre}</span>
+            <span>${item.producto}</span>
             <span class="shopping-item-quantity">${item.cantidad}</span>
             <button class="remove-item-btn" onclick="removeItem(${index})">Quitar</button>
         </li>
