@@ -11,7 +11,7 @@ body {
     background-color: var(--bg);
     color: var(--text);
     margin: 0;
-    padding: 20px;
+    padding: 15px;
 }
 
 header {
@@ -20,29 +20,34 @@ header {
 }
 
 .search-container input {
-    width: 90%;
+    width: 100%;
     max-width: 450px;
     padding: 12px 20px;
     border: 2px solid #ddd;
     border-radius: 25px;
-    font-size: 1rem;
+    font-size: 16px; /* Evita que Safari en iOS haga zoom automático al escribir */
     outline: none;
     transition: border-color 0.3s;
+    box-sizing: border-box;
 }
 
 .search-container input:focus {
     border-color: var(--primary);
 }
 
+/* Categorías con scroll horizontal suave en pantallas pequeñas */
 .categories-bar {
     display: flex;
-    justify-content: center;
+    justify-content: flex-start;
     gap: 8px;
-    flex-wrap: wrap;
     margin-top: 15px;
+    overflow-x: auto;
+    padding-bottom: 8px;
+    -webkit-overflow-scrolling: touch;
 }
 
 .categories-bar button {
+    flex: 0 0 auto;
     padding: 8px 14px;
     border: none;
     background: #e2e8f0;
@@ -50,6 +55,7 @@ header {
     cursor: pointer;
     font-weight: bold;
     color: var(--text);
+    white-space: nowrap;
 }
 
 .categories-bar button.active {
@@ -57,16 +63,18 @@ header {
     color: white;
 }
 
+/* Disposición móvil por defecto (una sola columna) */
 .main-layout {
-    display: grid;
-    grid-template-columns: 1fr 300px;
+    display: flex;
+    flex-direction: column-reverse; /* Pone la lista de compra abajo en móvil */
     gap: 20px;
 }
 
 .recipes-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    grid-template-columns: 1fr;
     gap: 20px;
+    width: 100%;
 }
 
 .card {
@@ -86,6 +94,7 @@ header {
     font-weight: bold;
     padding: 4px 8px;
     border-radius: 8px;
+    width: fit-content;
 }
 
 .card h3 {
@@ -99,15 +108,18 @@ header {
 }
 
 .btn {
-    padding: 8px 12px;
+    flex: 1;
+    padding: 10px;
     border: none;
     border-radius: 6px;
     cursor: pointer;
     font-size: 0.85rem;
     font-weight: bold;
+    text-align: center;
 }
 
 .btn-primary { background: var(--primary); color: white; }
+.btn-primary:hover { background: var(--primary-hover); }
 .btn-secondary { background: #edf2f7; color: var(--text); }
 
 .shopping-sidebar {
@@ -130,16 +142,17 @@ header {
 
 .btn-clear {
     width: 100%;
-    padding: 8px;
+    padding: 10px;
     background: #e74c3c;
     color: white;
     border: none;
     border-radius: 6px;
     cursor: pointer;
     margin-top: 10px;
+    font-weight: bold;
 }
 
-/* Modal */
+/* Modal responsivo */
 .modal {
     display: none;
     position: fixed;
@@ -147,17 +160,21 @@ header {
     background: rgba(0,0,0,0.5);
     justify-content: center;
     align-items: center;
+    padding: 15px;
+    box-sizing: border-box;
+    z-index: 1000;
 }
 
 .modal-content {
     background: white;
     padding: 25px;
     border-radius: 12px;
-    width: 90%;
+    width: 100%;
     max-width: 600px;
-    max-height: 80vh;
+    max-height: 85vh;
     overflow-y: auto;
     position: relative;
+    box-sizing: border-box;
 }
 
 .close-btn {
@@ -165,4 +182,26 @@ header {
     top: 15px; right: 20px;
     font-size: 1.5rem;
     cursor: pointer;
+}
+
+/* Pantallas grandes (Tablets y Escritorio desde 768px) */
+@media (min-width: 768px) {
+    body {
+        padding: 20px;
+    }
+
+    .categories-bar {
+        justify-content: center;
+        overflow-x: visible;
+    }
+
+    .main-layout {
+        display: grid;
+        grid-template-columns: 1fr 300px; /* Tu layout original en 2 columnas */
+        flex-direction: row;
+    }
+
+    .recipes-grid {
+        grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    }
 }
