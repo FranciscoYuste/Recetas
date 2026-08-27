@@ -27,13 +27,22 @@
 
     <main class="main-layout">
         <section class="recipes-grid" id="recipesGrid"></section>
-
-        <aside class="shopping-sidebar">
-            <h2>🛒 Lista de la Compra</h2>
-            <ul id="shoppingList"></ul>
-            <button id="clearListBtn" class="btn-clear">Vaciar Lista</button>
-        </aside>
     </main>
+
+    <!-- Botón Flotante para abrir la Lista de la Compra -->
+    <button id="openShoppingBtn" class="floating-shopping-btn">
+        🛒 Lista (<span id="cartCount">0</span>)
+    </button>
+
+    <!-- Modal de la Lista de la Compra -->
+    <div id="shoppingModal" class="modal">
+        <div class="modal-content">
+            <span class="close-btn" id="closeShoppingModal">&times;</span>
+            <h2>🛒 Lista de la Compra</h2>
+            <ul id="shoppingList" class="shopping-list"></ul>
+            <button id="clearListBtn" class="btn-clear">Vaciar Lista</button>
+        </div>
+    </div>
 
     <!-- Modal para ver la receta completa -->
     <div id="recipeModal" class="modal">
