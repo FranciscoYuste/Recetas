@@ -750,6 +750,8 @@
     { "id": "laca_fijadora", "nombre": "Laca / Fijador para el pelo" },
     { "id": "quitaesmalte", "nombre": "Quitaesmalte sin acetona" },
     { "id": "esmalte_unas", "nombre": "Esmalte de uñas" },
-    { "id": "crema_manos", "nombre": "Crema hidratante de manos y uñas" }
+    { "id": "crema_manos", "nombre": "Crema hidratante de manos y uñas" },
+    { "id": "sanytol", "nombre": "Sanytol" },
+    { "id": "helado", "nombre": "Helado" }
   ]
 }
