@@ -10,7 +10,9 @@
 
 <body>
     <header>
-        <h1>📖 Recetario Digital</h1>
+        <h1 class="site-title">
+            <img src="img/BannerRecetas.png" alt="Recetario Digital">
+        </h1>
         <div class="search-container">
             <input type="text" id="searchInput" placeholder="🔍 Buscar por título...">
         </div>
@@ -36,25 +38,34 @@
 
     <!-- Modal de la Lista de la Compra -->
     <div id="shoppingModal" class="modal">
-        <div class="modal-content">
+        <div class="modal-content shopping-modal-content">
             <span class="close-btn" id="closeShoppingModal">&times;</span>
             <h2>🛒 Lista de la Compra</h2>
             <p id="shoppingStatus" role="status" aria-live="polite"></p>
 
-            <div class="shopping-search-container">
-                <label for="shoppingSearchInput">Buscar producto</label>
-                <input type="search" id="shoppingSearchInput" placeholder="Ej.: tomates, leche..." autocomplete="off">
-                <div id="shoppingSearchResults" class="shopping-search-results"></div>
-            </div>
+            <div class="shopping-workspace">
+                <section class="shopping-add-panel" aria-labelledby="shoppingAddTitle">
+                    <h3 id="shoppingAddTitle">Añadir productos</h3>
+                    <div class="shopping-search-container">
+                        <label for="shoppingSearchInput">Buscar producto</label>
+                        <input type="search" id="shoppingSearchInput" placeholder="Ej.: tomates, leche..."
+                            autocomplete="off">
+                        <div id="shoppingSearchResults" class="shopping-search-results"></div>
+                    </div>
 
-            <div id="quantityContainer" class="quantity-container" hidden>
-                <span id="selectedProductName"></span>
-                <input type="number" id="shoppingQuantity" min="1" step="1" value="1" aria-label="Cantidad">
-                <button id="addShoppingItemBtn" class="btn btn-primary">Añadir</button>
-            </div>
+                    <div id="quantityContainer" class="quantity-container" hidden>
+                        <span id="selectedProductName"></span>
+                        <input type="number" id="shoppingQuantity" min="1" step="1" value="1" aria-label="Cantidad">
+                        <button id="addShoppingItemBtn" class="btn btn-primary">Añadir</button>
+                    </div>
+                </section>
 
-            <ul id="shoppingList" class="shopping-list"></ul>
-            <button id="clearListBtn" class="btn-clear">Vaciar Lista</button>
+                <section class="shopping-list-panel" aria-labelledby="shoppingListTitle">
+                    <h3 id="shoppingListTitle">Tu lista</h3>
+                    <ul id="shoppingList" class="shopping-list"></ul>
+                    <button id="clearListBtn" class="btn-clear">Vaciar Lista</button>
+                </section>
+            </div>
         </div>
     </div>
 
