@@ -36,6 +36,14 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Filtro por Buscador
     document.getElementById('searchInput').addEventListener('input', renderRecipes);
 
+    const backToTopBtn = document.getElementById('backToTopBtn');
+    window.addEventListener('scroll', () => {
+        backToTopBtn.hidden = window.scrollY < 500;
+    }, { passive: true });
+    backToTopBtn.addEventListener('click', () => {
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+    });
+
     document.getElementById('openShoppingBtn').onclick = openShoppingModal;
     document.getElementById('closeShoppingModal').onclick = closeShoppingModal;
     document.getElementById('shoppingSearchInput').addEventListener('input', renderProductResults);
