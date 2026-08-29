@@ -1,458 +1,713 @@
-﻿// App.js - Sistema completo integrado con Supabase
+﻿// App.js - Recetario Digital 100% Supabase
+// Tablas usadas (ver diagrama): recetas, categoria_recetas, recetas_favoritas,
+// productos, lista_compra, semanas_guardadas
+
 const SUPABASE_URL = 'https://vvhkuuuwpfbyqpthetos.supabase.co';
-const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_KKUvsjeLk_gGNfOpdcg9aQ_4R0NTNyV';
+const SUPABASE_KEY = 'sb_publishable_KKUvsjeLk_gGNfOpdcg9aQ_4R0NTNyV';
 
-// Tablas de Supabase
-const RECIPES_TABLE = 'recetas';
-const CATEGORIES_TABLE = 'categoria_recetas';
-const FAVORITES_TABLE = 'recetas_favoritas';
-const PRODUCTS_TABLE = 'productos';
-const SHOPPING_TABLE = 'lista_compra';
-const SAVED_WEEKS_TABLE = 'semanas_guardadas';
+const DIAS = [
+    { id: 1, nombre: 'Lunes' },
+    { id: 2, nombre: 'Martes' },
+    { id: 3, nombre: 'Miércoles' },
+    { id: 4, nombre: 'Jueves' },
+    { id: 5, nombre: 'Viernes' },
+    { id: 6, nombre: 'Sábado' },
+    { id: 7, nombre: 'Domingo' }
+];
+const TIPOS_COMIDA = ['Comida', 'Cena'];
 
-// Estado global de la aplicación
-let recipes = [];
-let categories = [];
-let favorites = [];
-let products = [];
-let shoppingList = [];
-let savedWeeks = [];
+let recipes = [];        // {id, title, url, ingredients, steps, categoria}
+let categories = [];     // {id, categoria}
+let favorites = [];      // {id, receta_id}
+let products = [];       // {id, nombre}
+let shoppingList = [];   // {id, id_producto, cantidad, nombre}
 
-let currentCategory = 'Todas';
+let currentCategoryFilter = 'Todas';
 let selectedProduct = null;
-let currentTab = 'recetas'; // 'recetas', 'semana', 'guardados'
 
-// Objeto para el menú semanal actual en memoria { "L-comida": recetaId, ... }
-let currentWeeklyPlan = {};
+// Menú semanal en edición (solo cliente, hasta que se guarda)
+let currentWeekMenu = {}; // key `${dia}_${tipo}` -> {receta_id, title}
+let savedMenusGrouped = {}; // semana -> [ {id, dia, tipo_comida, receta_id, title} ]
 
-const DAYS = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'];
-const MEALS = ['comida', 'cena'];
+let recipeIdPendingDelete = null;
+let categoryIdPendingDelete = null;
+let semanaPendingDelete = null;
+let currentlyViewedSemana = null;
 
-// Interceptor genérico para peticiones a Supabase REST API
+// -------------------- ARRANQUE --------------------
+
+document.addEventListener('DOMContentLoaded', async () => {
+    try {
+        await Promise.all([loadRecipes(), loadCategories(), loadFavorites(), loadProducts()]);
+        await loadShoppingList();
+        renderCategoryFilters();
+        renderFavoritesFilters();
+        renderCategorySelects();
+        renderRecipes();
+        updateFavoritesCount();
+    } catch (e) {
+        console.error('Error cargando datos iniciales:', e);
+        showShoppingError(e);
+    }
+
+    setupSearchAndFilters();
+    setupFavoritesModal();
+    setupShoppingModal();
+    setupRecipeModal();
+    setupCategoryPickerModal();
+    setupConfirmModal();
+    setupAddRecipeModal();
+    setupCategoryManagerModal();
+    setupWeeklyMenuModal();
+    setupSavedMenusModal();
+    setupBackToTop();
+    setupGlobalModalClose();
+});
+
+// -------------------- SUPABASE HELPER --------------------
+
 async function supabaseRequest(table, query = '', options = {}) {
     const response = await fetch(`${SUPABASE_URL}/rest/v1/${table}${query}`, {
         ...options,
         headers: {
-            'apikey': SUPABASE_PUBLISHABLE_KEY,
-            'Authorization': 'Bearer ' + SUPABASE_PUBLISHABLE_KEY,
+            apikey: SUPABASE_KEY,
+            Authorization: 'Bearer ' + SUPABASE_KEY,
             'Content-Type': 'application/json',
-            'Prefer': options.method === 'POST' ? 'return=representation' : undefined,
-            ...options.headers
+            Prefer: 'return=representation',
+            ...(options.headers || {})
         }
     });
     if (!response.ok) {
-        const errText = await response.text();
-        throw new Error(`Error en ${table} (${response.status}): ${errText}`);
+        const text = await response.text();
+        throw new Error(`Supabase (${table}) respondió con ${response.status}: ${text}`);
     }
-    if (response.status === 204) return [];
-    return await response.json();
+    if (response.status === 204) return null;
+    const text = await response.text();
+    return text ? JSON.parse(text) : null;
 }
 
-// Inicialización
-document.addEventListener('DOMContentLoaded', async () => {
-    try {
-        await reloadAllData();
-        setupEventListeners();
-        renderCategoriesNav();
-        renderRecipes();
-        renderWeeklyCalendar();
-    } catch (e) {
-        console.error('Error al inicializar:', e);
-    }
-});
-
-async function reloadAllData() {
-    await Promise.all([
-        loadCategories(),
-        loadRecipes(),
-        loadFavorites(),
-        loadProducts(),
-        loadShoppingList(),
-        loadSavedWeeks()
-    ]);
-}
-
-// Carga de datos
-async function loadCategories() {
-    categories = await supabaseRequest(CATEGORIES_TABLE, '?select=id,categoria&order=id');
-}
+// -------------------- CARGA DE DATOS --------------------
 
 async function loadRecipes() {
-    recipes = await supabaseRequest(RECIPES_TABLE, '?select=id,title,url,ingredients,steps,categoria&order=id');
+    recipes = await supabaseRequest('recetas', '?select=id,title,url,ingredients,steps,categoria&order=title.asc');
+}
+
+async function loadCategories() {
+    categories = await supabaseRequest('categoria_recetas', '?select=id,categoria&order=categoria.asc');
 }
 
 async function loadFavorites() {
-    // CAMBIO: 'receta_id' en minúscula
-    const favs = await supabaseRequest(FAVORITES_TABLE, '?select=id,receta_id');
-    favorites = favs.map(f => f.receta_id);
-    updateFavoritesCount();
+    try {
+        favorites = await supabaseRequest('recetas_favoritas', '?select=id,receta_id');
+    } catch (e) {
+        console.error('Error cargando favoritos:', e);
+        favorites = [];
+    }
 }
 
 async function loadProducts() {
-    products = await supabaseRequest(PRODUCTS_TABLE, '?select=id,nombre&order=nombre');
+    products = await supabaseRequest('productos', '?select=id,nombre&order=nombre.asc');
 }
 
 async function loadShoppingList() {
-    const raw = await supabaseRequest(SHOPPING_TABLE, '?select=id,id_producto,cantidad&order=id');
-    shoppingList = raw.map(item => {
-        const prod = products.find(p => String(p.id) === String(item.id_producto));
-        return {
-            id: item.id,
-            id_producto: item.id_producto,
-            nombre: prod ? prod.nombre : 'Producto desconocido',
-            cantidad: item.cantidad
-        };
-    });
+    const data = await supabaseRequest('lista_compra', '?select=id,id_producto,cantidad,productos(nombre)&order=id.asc');
+    shoppingList = (data || []).map(item => ({
+        id: item.id,
+        id_producto: item.id_producto,
+        cantidad: Number.isInteger(item.cantidad) && item.cantidad > 0 ? item.cantidad : 1,
+        nombre: item.productos ? item.productos.nombre : 'Producto'
+    }));
     renderShoppingList();
+    setShoppingStatus('Lista actualizada');
 }
 
-async function loadSavedWeeks() {
-    savedWeeks = await supabaseRequest(SAVED_WEEKS_TABLE, '?select=id,semana,dia,tipo_comida,receta_id&order=semana');
+// -------------------- CATEGORÍAS (filtros y selects) --------------------
+
+function categoryName(id) {
+    const c = categories.find(cat => cat.id === id);
+    return c ? c.categoria : 'Sin categoría';
 }
 
-// Configuración de eventos
-function setupEventListeners() {
-    // Navegación por pestañas
-    document.getElementById('navRecetas').onclick = () => switchTab('recetas');
-    document.getElementById('navSemana').onclick = () => switchTab('semana');
-    document.getElementById('navGuardados').onclick = () => switchTab('guardados');
+function renderCategoryFilters() {
+    const el = document.getElementById('categoryFilters');
+    el.innerHTML = '<button class="active" data-cat="Todas">Todas</button>' +
+        categories.map(c => `<button data-cat="${c.id}">${c.categoria}</button>`).join('');
+}
 
-    // Filtros de categoría y búsqueda de recetas
-    const catBar = document.getElementById('categoryFilters');
-    if (catBar) {
-        catBar.addEventListener('click', (e) => {
-            if (e.target.tagName === 'BUTTON') {
-                catBar.querySelectorAll('button').forEach(b => b.classList.remove('active'));
-                e.target.classList.add('active');
-                currentCategory = e.target.dataset.cat;
-                renderRecipes();
-            }
-        });
-    }
+function renderFavoritesFilters() {
+    const el = document.getElementById('favoritesFilters');
+    el.innerHTML = '<button class="active" data-cat="Todas">Todas</button>' +
+        categories.map(c => `<button data-cat="${c.id}">${c.categoria}</button>`).join('');
+}
 
-    const searchInput = document.getElementById('searchInput');
-    if (searchInput) searchInput.addEventListener('input', renderRecipes);
+function renderCategorySelects() {
+    const options = categories.map(c => `<option value="${c.id}">${c.categoria}</option>`).join('');
+    const newRecipeSelect = document.getElementById('newRecipeCategory');
+    if (newRecipeSelect) newRecipeSelect.innerHTML = options;
+}
 
-    // Botón volver arriba
-    const backToTopBtn = document.getElementById('backToTopBtn');
-    if (backToTopBtn) {
-        window.addEventListener('scroll', () => {
-            backToTopBtn.hidden = window.scrollY < 500;
-        }, { passive: true });
-        backToTopBtn.addEventListener('click', () => window.scrollTo({ top: 0, behavior: 'smooth' }));
-    }
+function setupSearchAndFilters() {
+    document.getElementById('categoryFilters').addEventListener('click', (e) => {
+        if (e.target.tagName !== 'BUTTON') return;
+        document.querySelectorAll('#categoryFilters button').forEach(b => b.classList.remove('active'));
+        e.target.classList.add('active');
+        const cat = e.target.dataset.cat;
+        currentCategoryFilter = cat === 'Todas' ? 'Todas' : Number(cat);
+        renderRecipes();
+    });
 
-    // Modal Favoritos
-    document.getElementById('openFavoritesBtn').onclick = openFavoritesModal;
-    document.getElementById('closeFavoritesModal').onclick = () => closeModal('favoritesModal');
-    document.getElementById('favoritesSearchInput').addEventListener('input', renderFavoritesGrid);
+    document.getElementById('searchInput').addEventListener('input', renderRecipes);
 
-    // Modal Lista Compra
-    document.getElementById('openShoppingBtn').onclick = openShoppingModal;
-    document.getElementById('closeShoppingModal').onclick = () => closeModal('shoppingModal');
-    document.getElementById('shoppingSearchInput').addEventListener('input', renderProductResults);
-    document.getElementById('addShoppingItemBtn').onclick = () => addSelectedProduct().catch(showShoppingError);
-    document.getElementById('clearListBtn').onclick = () => clearShoppingList().catch(showShoppingError);
-
-    // Modales Receta
-    document.getElementById('closeModal').onclick = () => closeModal('recipeModal');
-    document.getElementById('openAddRecipeBtn').onclick = openAddRecipeModal;
-    document.getElementById('closeAddRecipeModal').onclick = () => closeModal('addRecipeModal');
-    document.getElementById('addRecipeForm').onsubmit = handleAddRecipe;
-
-    // Gestión de Categorías
-    document.getElementById('openCategoriesBtn').onclick = openCategoriesModal;
-    document.getElementById('closeCategoriesModal').onclick = () => closeModal('categoriesModal');
-    document.getElementById('addCategoryBtn').onclick = handleAddCategory;
-
-    // Asignación al Menú Semanal
-    document.getElementById('closeAddToWeekModal').onclick = () => closeModal('addToWeekModal');
-    document.getElementById('confirmAddToWeekBtn').onclick = confirmAddToWeek;
-
-    // Guardar Semana
-    document.getElementById('saveWeekBtn').onclick = saveCurrentWeek;
-
-    // Cierre al hacer click fuera
-    window.onclick = (e) => {
-        const modals = ['recipeModal', 'shoppingModal', 'favoritesModal', 'addRecipeModal', 'categoriesModal', 'addToWeekModal', 'confirmDeleteModal'];
-        modals.forEach(mId => {
-            const el = document.getElementById(mId);
-            if (el && e.target === el) closeModal(mId);
-        });
+    const openAddRecipeBtn = document.getElementById('openAddRecipeBtn');
+    if (openAddRecipeBtn) openAddRecipeBtn.onclick = () => {
+        document.getElementById('addRecipeModal').style.display = 'flex';
     };
 }
 
-function switchTab(tab) {
-    currentTab = tab;
-    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-    document.getElementById(`nav${tab.charAt(0).toUpperCase() + tab.slice(1)}`).classList.add('active');
+// -------------------- RECETAS: LISTADO Y MODAL --------------------
 
-    document.getElementById('viewRecetas').style.display = tab === 'recetas' ? 'block' : 'none';
-    document.getElementById('viewSemana').style.display = tab === 'semana' ? 'block' : 'none';
-    document.getElementById('viewGuardados').style.display = tab === 'guardados' ? 'block' : 'none';
-
-    if (tab === 'guardados') renderSavedWeeks();
-}
-
-function closeModal(id) {
-    const el = document.getElementById(id);
-    if (el) el.style.display = 'none';
-}
-
-// Categorías UI
-function renderCategoriesNav() {
-    const nav = document.getElementById('categoryFilters');
-    let html = `<button class="${currentCategory === 'Todas' ? 'active' : ''}" data-cat="Todas">Todas</button>`;
-    categories.forEach(c => {
-        html += `<button class="${String(currentCategory) === String(c.id) ? 'active' : ''}" data-cat="${c.id}">${c.categoria}</button>`;
-    });
-    nav.innerHTML = html;
-}
-
-// Renderizado de Recetas
 function renderRecipes() {
     const grid = document.getElementById('recipesGrid');
-    const queryEl = document.getElementById('searchInput');
-    const query = normalizeText(queryEl ? queryEl.value : '');
-
+    const query = document.getElementById('searchInput').value.toLowerCase();
     const filtered = recipes.filter(r => {
-        let categoryMatch = false;
-        if (currentCategory === 'Todas') {
-            categoryMatch = true;
-        } else {
-            categoryMatch = String(r.categoria) === String(currentCategory);
-        }
-
-        const recipeTitle = r.title || r.titulo || '';
-        const matchQuery = normalizeText(recipeTitle).includes(query);
-
+        const categoryMatch = currentCategoryFilter === 'Todas' || r.categoria === currentCategoryFilter;
+        const matchQuery = (r.title || '').toLowerCase().includes(query);
         return categoryMatch && matchQuery;
     });
-
     if (filtered.length === 0) {
-        grid.innerHTML = '<div class="empty-state"><p>📭 No se encontraron recetas en esta categoría.</p></div>';
+        grid.innerHTML = '<div class="empty-state"><p>No hay recetas que coincidan.</p></div>';
         return;
     }
-
-    grid.innerHTML = filtered.map(r => {
-        const isFav = favorites.includes(r.id);
-        const title = r.title || r.titulo || 'Sin título';
-
-        // Opciones del selector de categoría para esta receta
-        const optionsHtml = categories.map(c => {
-            const selected = String(c.id) === String(r.categoria) ? 'selected' : '';
-            return `<option value="${c.id}" ${selected}>${c.categoria}</option>`;
-        }).join('');
-
-        return `
-            <div class="card">
-                <div>
-                    <!-- Selector directo de categoría -->
-                    <select class="badge-select" onchange="updateRecipeCategory(${r.id}, this.value)">
-                        <option value="" ${!r.categoria ? 'selected' : ''}>Sin categoría</option>
-                        ${optionsHtml}
-                    </select>
-                    <h3>${title}</h3>
-                </div>
-                <div class="card-actions">
-                    <button class="favorite-btn ${isFav ? 'active' : ''}" title="${isFav ? 'Quitar de favoritos' : 'Agregar a favoritos'}" onclick="toggleFavorite(${r.id})">${isFav ? '⭐' : '☆'}</button>
-                    <button class="btn btn-primary" onclick="openModal(${r.id})">📖 Ver</button>
-                    <button class="btn btn-secondary" onclick="openAddToWeekModal(${r.id})">📅 Menú</button>
-                    <button class="btn btn-delete" onclick="askDeleteRecipe(${r.id})">🗑️</button>
-                </div>
-            </div>
-        `;
-    }).join('');
+    grid.innerHTML = filtered.map(recipeCardHtml).join('');
 }
 
-// Modal Ver Receta
-function openModal(id) {
-    const r = recipes.find(item => String(item.id) === String(id));
-    if (!r) return;
-    const catObj = categories.find(c => String(c.id) === String(r.categoria));
-
-    document.getElementById('modalTitle').innerText = r.title;
-    document.getElementById('modalCategory').innerText = catObj ? catObj.categoria : 'Sin categoría';
-    
-    // Si ingredientes viene como string o json
-    let ings = [];
-    try { ings = typeof r.ingredients === 'string' ? JSON.parse(r.ingredients) : (r.ingredients || []); } catch { ings = [r.ingredients]; }
-    document.getElementById('modalIngredients').innerHTML = Array.isArray(ings) ? ings.map(i => `<li>${i}</li>`).join('') : `<li>${r.ingredients}</li>`;
-
-    document.getElementById('modalSteps').innerText = r.steps || 'Sin pasos especificados.';
-    const urlWrapper = document.getElementById('modalUrlWrapper');
-    urlWrapper.innerHTML = r.url ? `<a href="${r.url}" target="_blank" rel="noopener">🌐 Ver receta original</a>` : '';
-    
-    document.getElementById('recipeModal').style.display = 'flex';
+function recipeCardHtml(r) {
+    return '<div class="card"><div><button class="badge badge-btn" title="Cambiar categoría" onclick="openCategoryPicker(' + r.id + ')">' +
+        categoryName(r.categoria) + ' ✎</button><h3>' + r.title + '</h3></div><div class="card-actions">' +
+        '<button class="favorite-btn ' + (isFavorite(r.id) ? 'active' : '') + '" title="' +
+        (isFavorite(r.id) ? 'Quitar de favoritos' : 'Agregar a favoritos') +
+        '" onclick="toggleFavorite(' + r.id + ')">' + (isFavorite(r.id) ? '⭐' : '☆') + '</button>' +
+        '<button class="btn btn-primary" onclick="openModal(' + r.id + ')">📖 Ver Receta</button>' +
+        '<button class="delete-recipe-btn" title="Eliminar receta" onclick="askDeleteRecipe(' + r.id + ')">🗑️</button></div></div>';
 }
 
-// Añadir Nueva Receta
-function openAddRecipeModal() {
-    const select = document.getElementById('addRecipeCategory');
-    select.innerHTML = categories.map(c => `<option value="${c.id}">${c.categoria}</option>`).join('');
-    document.getElementById('addRecipeForm').reset();
-    document.getElementById('addRecipeModal').style.display = 'flex';
-}
+// -------------------- SELECTOR DE CATEGORÍA (desde la tarjeta) --------------------
 
-async function handleAddRecipe(e) {
-    e.preventDefault();
-    const title = document.getElementById('addRecipeTitle').value;
-    const categoria = parseInt(document.getElementById('addRecipeCategory').value);
-    const ingredientsText = document.getElementById('addRecipeIngredients').value;
-    const steps = document.getElementById('addRecipeSteps').value;
-    const url = document.getElementById('addRecipeUrl').value;
+function openCategoryPicker(recipeId) {
+    const recipe = recipes.find(r => r.id === recipeId);
+    if (!recipe) return;
+    const modal = document.getElementById('categoryPickerModal');
+    modal.dataset.recipeId = String(recipeId);
+    document.getElementById('categoryPickerRecipeTitle').innerText = recipe.title;
 
-    const ingredients = ingredientsText.split('\n').filter(i => i.trim() !== '');
+    const list = document.getElementById('categoryPickerList');
+    const noneBtn = `<button class="category-picker-option ${recipe.categoria == null ? 'active' : ''}" data-cat="">Sin categoría</button>`;
+    const catButtons = categories.map(c =>
+        `<button class="category-picker-option ${recipe.categoria === c.id ? 'active' : ''}" data-cat="${c.id}">${c.categoria}</button>`
+    ).join('');
+    list.innerHTML = noneBtn + catButtons;
+    list.querySelectorAll('.category-picker-option').forEach(btn => {
+        btn.onclick = () => assignCategoryToRecipe(recipeId, btn.dataset.cat ? Number(btn.dataset.cat) : null);
+    });
 
-    try {
-        const newRec = await supabaseRequest(RECIPES_TABLE, '', {
-            method: 'POST',
-            body: JSON.stringify({ title, categoria, ingredients: JSON.stringify(ingredients), steps, url })
-        });
-        recipes.push(newRec[0] || newRec);
-        closeModal('addRecipeModal');
-        renderRecipes();
-    } catch (err) {
-        alert('Error creando receta: ' + err.message);
-    }
-}
-
-// Eliminar Receta con modal de confirmación
-let recipeToDeleteId = null;
-function askDeleteRecipe(id) {
-    recipeToDeleteId = id;
-    const modal = document.getElementById('confirmDeleteModal');
-    document.getElementById('confirmDeleteBtn').onclick = confirmDeleteRecipe;
-    document.getElementById('cancelDeleteBtn').onclick = () => closeModal('confirmDeleteModal');
     modal.style.display = 'flex';
 }
 
-async function confirmDeleteRecipe() {
-    if (!recipeToDeleteId) return;
+async function assignCategoryToRecipe(recipeId, categoryId) {
     try {
-        await supabaseRequest(RECIPES_TABLE, `?id=eq.${recipeToDeleteId}`, { method: 'DELETE' });
-        recipes = recipes.filter(r => r.id !== recipeToDeleteId);
-        favorites = favorites.filter(fId => fId !== recipeToDeleteId);
-        closeModal('confirmDeleteModal');
-        renderRecipes();
-        updateFavoritesCount();
-    } catch (err) {
-        alert('Error al eliminar la receta: ' + err.message);
-    }
-}
-
-// Gestión de Categorías Modal
-function openCategoriesModal() {
-    renderCategoriesList();
-    document.getElementById('categoriesModal').style.display = 'flex';
-}
-
-function renderCategoriesList() {
-    const list = document.getElementById('categoriesList');
-    list.innerHTML = categories.map(c => `
-        <li>
-            <span>${c.categoria}</span>
-            <button class="remove-item-btn" onclick="deleteCategory(${c.id})">Eliminar</button>
-        </li>
-    `).join('');
-}
-
-async function handleAddCategory() {
-    const input = document.getElementById('newCategoryName');
-    const name = input.value.trim();
-    if (!name) return;
-    try {
-        const res = await supabaseRequest(CATEGORIES_TABLE, '', {
-            method: 'POST',
-            body: JSON.stringify({ categoria: name })
+        await supabaseRequest('recetas', `?id=eq.${recipeId}`, {
+            method: 'PATCH',
+            body: JSON.stringify({ categoria: categoryId })
         });
-        categories.push(res[0] || res);
-        input.value = '';
-        renderCategoriesList();
-        renderCategoriesNav();
-    } catch (err) {
-        alert('Error creando categoría: ' + err.message);
-    }
-}
-
-async function deleteCategory(id) {
-    try {
-        await supabaseRequest(CATEGORIES_TABLE, `?id=eq.${id}`, { method: 'DELETE' });
-        categories = categories.filter(c => c.id !== id);
-        renderCategoriesList();
-        renderCategoriesNav();
+        await loadRecipes();
         renderRecipes();
-    } catch (err) {
-        alert('No se puede eliminar la categoría si contiene recetas asociadas.');
-    }
-}
-
-// Favoritos
-async function toggleFavorite(recipeId) {
-    if (favorites.includes(recipeId)) {
-        // CAMBIO: 'receta_id' en minúscula
-        await supabaseRequest(FAVORITES_TABLE, `?receta_id=eq.${recipeId}`, { method: 'DELETE' });
-        favorites = favorites.filter(id => id !== recipeId);
-    } else {
-        await supabaseRequest(FAVORITES_TABLE, '', {
-            method: 'POST',
-            // CAMBIO: 'receta_id' en minúscula
-            body: JSON.stringify({ receta_id: recipeId })
-        });
-        favorites.push(recipeId);
-    }
-    updateFavoritesCount();
-    renderRecipes();
-    if (document.getElementById('favoritesModal').style.display === 'flex') {
         renderFavoritesGrid();
+        document.getElementById('categoryPickerModal').style.display = 'none';
+    } catch (e) {
+        alert('No se pudo actualizar la categoría: ' + e.message);
+    }
+}
+
+function setupCategoryPickerModal() {
+    document.getElementById('closeCategoryPickerModal').onclick = () => {
+        document.getElementById('categoryPickerModal').style.display = 'none';
+    };
+}
+
+function setupRecipeModal() {
+    document.getElementById('closeModal').onclick = () => {
+        document.getElementById('recipeModal').style.display = 'none';
+    };
+
+    const daySelect = document.getElementById('modalWeeklyDay');
+    daySelect.innerHTML = DIAS.map(d => `<option value="${d.id}">${d.nombre}</option>`).join('');
+
+    document.getElementById('modalAddToWeeklyBtn').onclick = () => {
+        const id = Number(document.getElementById('recipeModal').dataset.recipeId);
+        const recipe = recipes.find(r => r.id === id);
+        if (!recipe) return;
+        const dia = Number(daySelect.value);
+        const tipo = document.getElementById('modalWeeklyMealType').value;
+        currentWeekMenu[`${dia}_${tipo}`] = { receta_id: recipe.id, title: recipe.title };
+        renderWeeklyGrid();
+        alert(`"${recipe.title}" añadida a ${DIAS.find(d => d.id === dia).nombre} - ${tipo}`);
+    };
+}
+
+function openModal(id) {
+    const r = recipes.find(item => item.id === id);
+    if (!r) return;
+    const modal = document.getElementById('recipeModal');
+    modal.dataset.recipeId = String(id);
+    document.getElementById('modalTitle').innerText = r.title;
+    document.getElementById('modalCategory').innerText = categoryName(r.categoria);
+
+    const ingredientsList = (r.ingredients || '')
+        .split('\n')
+        .map(i => i.trim())
+        .filter(Boolean);
+    document.getElementById('modalIngredients').innerHTML = ingredientsList.map(ing => '<li>' + ing + '</li>').join('');
+
+    document.getElementById('modalSteps').innerHTML = (r.steps || 'Sin pasos especificados.').replace(/\n/g, '<br>');
+
+    const urlWrapper = document.getElementById('modalUrlWrapper');
+    urlWrapper.innerHTML = r.url ? '<a href="' + r.url + '" target="_blank" rel="noopener">🌐 Ver receta original</a>' : '';
+
+    modal.style.display = 'flex';
+}
+
+// -------------------- AÑADIR RECETA --------------------
+
+function setupAddRecipeModal() {
+    document.getElementById('closeAddRecipeModal').onclick = () => {
+        document.getElementById('addRecipeModal').style.display = 'none';
+    };
+    document.getElementById('addRecipeForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const title = document.getElementById('newRecipeTitle').value.trim();
+        const url = document.getElementById('newRecipeUrl').value.trim();
+        const ingredients = document.getElementById('newRecipeIngredients').value.trim();
+        const steps = document.getElementById('newRecipeSteps').value.trim();
+        const categorySelect = document.getElementById('newRecipeCategory');
+        const categoria = categorySelect.value ? Number(categorySelect.value) : null;
+        if (!title || !ingredients || !steps) return;
+
+        try {
+            await supabaseRequest('recetas', '', {
+                method: 'POST',
+                body: JSON.stringify([{ title, url: url || null, ingredients, steps, categoria }])
+            });
+            await loadRecipes();
+            renderRecipes();
+            e.target.reset();
+            document.getElementById('addRecipeModal').style.display = 'none';
+        } catch (err) {
+            alert('No se pudo guardar la receta: ' + err.message);
+        }
+    });
+}
+
+// -------------------- ELIMINAR RECETA (con confirmación) --------------------
+
+function askDeleteRecipe(id) {
+    recipeIdPendingDelete = id;
+    categoryIdPendingDelete = null;
+    semanaPendingDelete = null;
+    const recipe = recipes.find(r => r.id === id);
+    document.getElementById('confirmMessage').innerText =
+        `¿Seguro que quieres eliminar la receta "${recipe ? recipe.title : ''}" de tu base de datos? Esta acción no se puede deshacer.`;
+    document.getElementById('confirmModal').style.display = 'flex';
+}
+
+function setupConfirmModal() {
+    document.getElementById('confirmNoBtn').onclick = closeConfirmModal;
+    document.getElementById('confirmYesBtn').onclick = async () => {
+        try {
+            if (recipeIdPendingDelete != null) {
+                const id = recipeIdPendingDelete;
+                await supabaseRequest('recetas_favoritas', `?receta_id=eq.${id}`, { method: 'DELETE' });
+                await supabaseRequest('semanas_guardadas', `?receta_id=eq.${id}`, { method: 'DELETE' });
+                await supabaseRequest('recetas', `?id=eq.${id}`, { method: 'DELETE' });
+                await Promise.all([loadRecipes(), loadFavorites()]);
+                renderRecipes();
+                updateFavoritesCount();
+                document.getElementById('recipeModal').style.display = 'none';
+            } else if (categoryIdPendingDelete != null) {
+                const id = categoryIdPendingDelete;
+                await supabaseRequest('recetas', `?categoria=eq.${id}`, {
+                    method: 'PATCH',
+                    body: JSON.stringify({ categoria: null })
+                });
+                await supabaseRequest('categoria_recetas', `?id=eq.${id}`, { method: 'DELETE' });
+                await Promise.all([loadCategories(), loadRecipes()]);
+                renderCategoryFilters();
+                renderFavoritesFilters();
+                renderCategorySelects();
+                renderRecipes();
+                renderCategoryManagerList();
+            } else if (semanaPendingDelete != null) {
+                const semana = semanaPendingDelete;
+                await supabaseRequest('semanas_guardadas', `?semana=eq.${semana}`, { method: 'DELETE' });
+                await loadSavedMenus();
+                currentlyViewedSemana = null;
+                renderSavedMenusList();
+                document.getElementById('savedMenuDetail').innerHTML = '';
+                document.getElementById('savedMenuDetailTitle').innerHTML = '';
+            }
+        } catch (e) {
+            alert('No se pudo completar la eliminación: ' + e.message);
+        } finally {
+            closeConfirmModal();
+        }
+    };
+}
+
+function closeConfirmModal() {
+    recipeIdPendingDelete = null;
+    categoryIdPendingDelete = null;
+    semanaPendingDelete = null;
+    document.getElementById('confirmModal').style.display = 'none';
+}
+
+// -------------------- GESTIÓN DE CATEGORÍAS --------------------
+
+function setupCategoryManagerModal() {
+    document.getElementById('openCategoryManagerBtn').onclick = () => {
+        renderCategoryManagerList();
+        document.getElementById('categoryManagerModal').style.display = 'flex';
+    };
+    document.getElementById('closeCategoryManagerModal').onclick = () => {
+        document.getElementById('categoryManagerModal').style.display = 'none';
+    };
+    document.getElementById('addCategoryBtn').onclick = async () => {
+        const input = document.getElementById('newCategoryName');
+        const name = input.value.trim();
+        if (!name) return;
+        try {
+            await supabaseRequest('categoria_recetas', '', {
+                method: 'POST',
+                body: JSON.stringify([{ categoria: name }])
+            });
+            input.value = '';
+            await loadCategories();
+            renderCategoryFilters();
+            renderFavoritesFilters();
+            renderCategorySelects();
+            renderCategoryManagerList();
+        } catch (e) {
+            alert('No se pudo añadir la categoría: ' + e.message);
+        }
+    };
+}
+
+function renderCategoryManagerList() {
+    const list = document.getElementById('categoryManagerList');
+    if (categories.length === 0) {
+        list.innerHTML = '<li>No hay categorías todavía.</li>';
+        return;
+    }
+    list.innerHTML = categories.map(c =>
+        `<li><span>${c.categoria}</span><button class="btn-clear" onclick="askDeleteCategory(${c.id})">Eliminar</button></li>`
+    ).join('');
+}
+
+function askDeleteCategory(id) {
+    recipeIdPendingDelete = null;
+    semanaPendingDelete = null;
+    categoryIdPendingDelete = id;
+    const cat = categories.find(c => c.id === id);
+    document.getElementById('confirmMessage').innerText =
+        `¿Eliminar la categoría "${cat ? cat.categoria : ''}"? Las recetas asignadas quedarán sin categoría.`;
+    document.getElementById('confirmModal').style.display = 'flex';
+}
+
+// -------------------- MENÚ SEMANAL --------------------
+
+function setupWeeklyMenuModal() {
+    document.getElementById('openWeeklyMenuBtn').onclick = () => {
+        renderWeeklyGrid();
+        document.getElementById('weeklyMenuModal').style.display = 'flex';
+    };
+    document.getElementById('closeWeeklyMenuModal').onclick = () => {
+        document.getElementById('weeklyMenuModal').style.display = 'none';
+    };
+    document.getElementById('clearWeeklyMenuBtn').onclick = () => {
+        currentWeekMenu = {};
+        renderWeeklyGrid();
+    };
+    document.getElementById('saveWeeklyMenuBtn').onclick = saveWeeklyMenu;
+}
+
+function generateWeeklyGridHtml(menuData, readOnly) {
+    // Vista de escritorio: tabla Comida/Cena x Días
+    let tableHtml = '<table class="weekly-grid-table"><thead><tr><th>Comida</th>' +
+        DIAS.map(d => `<th>${d.nombre}</th>`).join('') + '</tr></thead><tbody>';
+    TIPOS_COMIDA.forEach(tipo => {
+        tableHtml += `<tr><td class="weekly-row-label">${tipo}</td>`;
+        DIAS.forEach(d => {
+            const key = `${d.id}_${tipo}`;
+            const entry = menuData[key];
+            if (entry) {
+                tableHtml += `<td class="weekly-cell filled">${entry.title}` +
+                    (readOnly ? '' : ` <button class="remove-item-btn" onclick="removeFromWeeklyMenu('${key}')">×</button>`) +
+                    '</td>';
+            } else {
+                tableHtml += '<td class="weekly-cell empty">—</td>';
+            }
+        });
+        tableHtml += '</tr>';
+    });
+    tableHtml += '</tbody></table>';
+
+    // Vista de móvil: una tarjeta vertical por día
+    let mobileHtml = '<div class="weekly-grid-mobile">';
+    DIAS.forEach(d => {
+        mobileHtml += `<div class="weekly-day-card"><h4>${d.nombre}</h4>`;
+        TIPOS_COMIDA.forEach(tipo => {
+            const key = `${d.id}_${tipo}`;
+            const entry = menuData[key];
+            mobileHtml += `<div class="weekly-day-row"><span class="weekly-day-meal-label">${tipo}</span><span class="weekly-day-meal-value">`;
+            if (entry) {
+                mobileHtml += entry.title +
+                    (readOnly ? '' : ` <button class="remove-item-btn" onclick="removeFromWeeklyMenu('${key}')">×</button>`);
+            } else {
+                mobileHtml += '—';
+            }
+            mobileHtml += '</span></div>';
+        });
+        mobileHtml += '</div>';
+    });
+    mobileHtml += '</div>';
+
+    return tableHtml + mobileHtml;
+}
+
+function renderWeeklyGrid(containerId = 'weeklyGrid', menuData = null, readOnly = false) {
+    const container = document.getElementById(containerId);
+    const data = menuData || currentWeekMenu;
+    container.innerHTML = generateWeeklyGridHtml(data, readOnly);
+}
+
+function removeFromWeeklyMenu(key) {
+    delete currentWeekMenu[key];
+    renderWeeklyGrid();
+}
+
+async function saveWeeklyMenu() {
+    const entries = Object.entries(currentWeekMenu);
+    if (entries.length === 0) {
+        alert('Añade al menos una receta a tu menú semanal antes de guardarlo.');
+        return;
+    }
+    try {
+        const existing = await supabaseRequest('semanas_guardadas', '?select=semana&order=semana.desc&limit=1');
+        const nextSemana = existing && existing.length > 0 ? existing[0].semana + 1 : 1;
+        const rows = entries.map(([key, val]) => {
+            const [dia, tipo] = key.split('_');
+            return { semana: nextSemana, dia: Number(dia), tipo_comida: tipo, receta_id: val.receta_id };
+        });
+        await supabaseRequest('semanas_guardadas', '', { method: 'POST', body: JSON.stringify(rows) });
+        currentWeekMenu = {};
+        renderWeeklyGrid();
+        alert('Menú semanal guardado correctamente.');
+    } catch (e) {
+        alert('No se pudo guardar el menú semanal: ' + e.message);
+    }
+}
+
+// -------------------- MENÚS GUARDADOS --------------------
+
+function setupSavedMenusModal() {
+    document.getElementById('openSavedMenusBtn').onclick = async () => {
+        try {
+            await loadSavedMenus();
+            currentlyViewedSemana = null;
+            renderSavedMenusList();
+            document.getElementById('savedMenuDetail').innerHTML = '';
+            document.getElementById('savedMenuDetailTitle').innerHTML = '';
+            document.getElementById('savedMenusModal').style.display = 'flex';
+        } catch (e) {
+            alert('No se pudieron cargar los menús guardados: ' + e.message);
+        }
+    };
+    document.getElementById('closeSavedMenusModal').onclick = () => {
+        document.getElementById('savedMenusModal').style.display = 'none';
+    };
+}
+
+async function loadSavedMenus() {
+    const data = await supabaseRequest(
+        'semanas_guardadas',
+        '?select=id,semana,dia,tipo_comida,receta_id,recetas(title)&order=semana.desc,dia.asc'
+    );
+    savedMenusGrouped = {};
+    (data || []).forEach(row => {
+        if (!savedMenusGrouped[row.semana]) savedMenusGrouped[row.semana] = [];
+        savedMenusGrouped[row.semana].push({
+            id: row.id,
+            dia: row.dia,
+            tipo_comida: row.tipo_comida,
+            receta_id: row.receta_id,
+            title: row.recetas ? row.recetas.title : 'Receta eliminada'
+        });
+    });
+}
+
+function renderSavedMenusList() {
+    const list = document.getElementById('savedMenusList');
+    const semanas = Object.keys(savedMenusGrouped).sort((a, b) => b - a);
+    if (semanas.length === 0) {
+        list.innerHTML = '<div class="empty-state"><p>Todavía no has guardado ningún menú semanal.</p></div>';
+        return;
+    }
+    list.innerHTML = semanas.map(semana => {
+        const isOpen = String(currentlyViewedSemana) === String(semana);
+        return `<div class="saved-menu-item">
+            <span>Semana ${semana}</span>
+            <div>
+                <button class="btn btn-secondary" onclick="toggleSavedMenu(${semana})">${isOpen ? 'Ocultar' : 'Ver'}</button>
+                <button class="btn-clear" onclick="askDeleteSavedMenu(${semana})">Eliminar</button>
+            </div>
+        </div>`;
+    }).join('');
+}
+
+function toggleSavedMenu(semana) {
+    if (String(currentlyViewedSemana) === String(semana)) {
+        currentlyViewedSemana = null;
+        document.getElementById('savedMenuDetail').innerHTML = '';
+        document.getElementById('savedMenuDetailTitle').innerHTML = '';
+    } else {
+        currentlyViewedSemana = semana;
+        viewSavedMenu(semana);
+    }
+    renderSavedMenusList();
+}
+
+function viewSavedMenu(semana) {
+    const entries = savedMenusGrouped[semana] || [];
+    const menuData = {};
+    entries.forEach(e => {
+        menuData[`${e.dia}_${e.tipo_comida}`] = { receta_id: e.receta_id, title: e.title };
+    });
+    document.getElementById('savedMenuDetailTitle').innerHTML = `<h3>Semana ${semana}</h3>`;
+    renderWeeklyGrid('savedMenuDetail', menuData, true);
+}
+
+function askDeleteSavedMenu(semana) {
+    recipeIdPendingDelete = null;
+    categoryIdPendingDelete = null;
+    semanaPendingDelete = semana;
+    document.getElementById('confirmMessage').innerText = `¿Eliminar la Semana ${semana}? No se podrá recuperar.`;
+    document.getElementById('confirmModal').style.display = 'flex';
+}
+
+// -------------------- FAVORITOS --------------------
+
+function isFavorite(recipeId) {
+    return favorites.some(f => f.receta_id === recipeId);
+}
+
+async function toggleFavorite(recipeId) {
+    try {
+        const existing = favorites.find(f => f.receta_id === recipeId);
+        if (existing) {
+            await supabaseRequest('recetas_favoritas', `?id=eq.${existing.id}`, { method: 'DELETE' });
+        } else {
+            await supabaseRequest('recetas_favoritas', '', {
+                method: 'POST',
+                body: JSON.stringify([{ receta_id: recipeId }])
+            });
+        }
+        await loadFavorites();
+        updateFavoritesCount();
+        renderRecipes();
+        renderFavoritesGrid();
+    } catch (e) {
+        console.error('Error actualizando favorito:', e);
     }
 }
 
 function updateFavoritesCount() {
-    document.getElementById('favoritesCount').textContent = favorites.length;
+    const favCount = document.getElementById('favoritesCount');
+    if (favCount) favCount.textContent = favorites.length;
 }
 
-function openFavoritesModal() {
-    document.getElementById('favoritesModal').style.display = 'flex';
-    document.getElementById('favoritesSearchInput').value = '';
-    renderFavoritesGrid();
+function setupFavoritesModal() {
+    document.getElementById('openFavoritesBtn').onclick = () => {
+        document.getElementById('favoritesModal').style.display = 'flex';
+        document.getElementById('favoritesSearchInput').value = '';
+        document.querySelectorAll('#favoritesFilters button').forEach((b, i) => {
+            b.classList.toggle('active', i === 0);
+        });
+        renderFavoritesGrid();
+    };
+    document.getElementById('closeFavoritesModal').onclick = () => {
+        document.getElementById('favoritesModal').style.display = 'none';
+    };
+    document.getElementById('favoritesSearchInput').addEventListener('input', renderFavoritesGrid);
+    document.getElementById('favoritesFilters').addEventListener('click', (e) => {
+        if (e.target.tagName !== 'BUTTON') return;
+        document.querySelectorAll('#favoritesFilters button').forEach(b => b.classList.remove('active'));
+        e.target.classList.add('active');
+        renderFavoritesGrid();
+    });
 }
 
 function renderFavoritesGrid() {
     const grid = document.getElementById('favoritesGrid');
-    const query = normalizeText(document.getElementById('favoritesSearchInput').value);
-    const favoriteRecipes = recipes.filter(r => favorites.includes(r.id) && normalizeText(r.title).includes(query));
+    const query = document.getElementById('favoritesSearchInput').value.toLowerCase();
+    const activeBtn = document.querySelector('#favoritesFilters .active');
+    const currentFavCategory = activeBtn ? activeBtn.dataset.cat : 'Todas';
 
-    if (favoriteRecipes.length === 0) {
-        grid.innerHTML = '<div class="empty-state"><p>📭 No hay recetas favoritas</p></div>';
+    const favoriteRecipes = recipes.filter(r => favorites.some(f => f.receta_id === r.id));
+    const filtered = favoriteRecipes.filter(r => {
+        const categoryMatch = currentFavCategory === 'Todas' || r.categoria === Number(currentFavCategory);
+        const matchQuery = (r.title || '').toLowerCase().includes(query);
+        return categoryMatch && matchQuery;
+    });
+
+    if (favorites.length === 0) {
+        grid.innerHTML = '<div class="empty-state"><p>📭 Aún no tienes favoritas</p><p>Marca recetas con ⭐ en el apartado principal</p></div>';
         return;
     }
-
-    grid.innerHTML = favoriteRecipes.map(r => `
-        <div class="card">
-            <div>
-                <h3>${r.title}</h3>
-            </div>
-            <div class="card-actions">
-                <button class="favorite-btn active" onclick="toggleFavorite(${r.id})">⭐</button>
-                <button class="btn btn-primary" onclick="openModal(${r.id})">📖 Ver</button>
-            </div>
-        </div>
-    `).join('');
+    if (filtered.length === 0) {
+        grid.innerHTML = '<div class="empty-state"><p>No hay favoritas en esta categoría</p></div>';
+        return;
+    }
+    grid.innerHTML = filtered.map(recipeCardHtml).join('');
 }
 
-// Lista de la compra
-function openShoppingModal() {
-    document.getElementById('shoppingModal').style.display = 'flex';
-    document.getElementById('shoppingSearchInput').focus();
-    renderProductResults();
+// -------------------- LISTA DE LA COMPRA --------------------
+
+function setupShoppingModal() {
+    document.getElementById('openShoppingBtn').onclick = () => {
+        document.getElementById('shoppingModal').style.display = 'flex';
+        document.getElementById('shoppingSearchInput').focus();
+        renderProductResults();
+    };
+    document.getElementById('closeShoppingModal').onclick = closeShoppingModal;
+    document.getElementById('shoppingSearchInput').addEventListener('input', renderProductResults);
+    document.getElementById('addShoppingItemBtn').onclick = () => addSelectedProduct().catch(showShoppingError);
+    document.getElementById('shoppingQuantity').addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') addSelectedProduct().catch(showShoppingError);
+    });
+    document.getElementById('clearListBtn').onclick = () => clearShoppingList().catch(showShoppingError);
+}
+
+function closeShoppingModal() {
+    document.getElementById('shoppingModal').style.display = 'none';
+    clearProductSelection();
 }
 
 function renderProductResults() {
     const query = normalizeText(document.getElementById('shoppingSearchInput').value);
     const results = products.filter(p => normalizeText(p.nombre).includes(query)).slice(0, 12);
     const resultsEl = document.getElementById('shoppingSearchResults');
-    resultsEl.innerHTML = results.map(p => `<button class="product-result" type="button" onclick="selectProduct(${p.id})">${p.nombre}</button>`).join('');
+    resultsEl.innerHTML = results.map(p => `<button class="product-result" type="button" data-product-id="${p.id}">${p.nombre}</button>`).join('');
+    resultsEl.querySelectorAll('.product-result').forEach(button => {
+        button.onclick = () => selectProduct(button.dataset.productId);
+    });
 }
 
 function selectProduct(id) {
@@ -461,6 +716,7 @@ function selectProduct(id) {
     document.getElementById('selectedProductName').textContent = selectedProduct.nombre;
     document.getElementById('quantityContainer').hidden = false;
     document.getElementById('shoppingQuantity').focus();
+    document.getElementById('shoppingQuantity').select();
 }
 
 function clearProductSelection() {
@@ -471,253 +727,83 @@ function clearProductSelection() {
 
 async function addSelectedProduct() {
     const quantity = Number(document.getElementById('shoppingQuantity').value);
-    if (!selectedProduct || quantity < 1) return;
-
-    const existing = shoppingList.find(i => String(i.id_producto) === String(selectedProduct.id));
-    if (existing) {
-        const newQty = existing.cantidad + quantity;
-        await supabaseRequest(SHOPPING_TABLE, `?id=eq.${existing.id}`, {
+    if (!selectedProduct || !Number.isInteger(quantity) || quantity < 1) return;
+    const existingItem = shoppingList.find(item => item.id_producto === selectedProduct.id);
+    if (existingItem) {
+        await supabaseRequest('lista_compra', `?id=eq.${existingItem.id}`, {
             method: 'PATCH',
-            body: JSON.stringify({ cantidad: newQty })
+            body: JSON.stringify({ cantidad: existingItem.cantidad + quantity })
         });
     } else {
-        await supabaseRequest(SHOPPING_TABLE, '', {
+        await supabaseRequest('lista_compra', '', {
             method: 'POST',
-            body: JSON.stringify({ id_producto: selectedProduct.id, cantidad: quantity })
+            body: JSON.stringify([{ id_producto: selectedProduct.id, cantidad: quantity }])
         });
     }
-    clearProductSelection();
     await loadShoppingList();
+    clearProductSelection();
 }
 
-async function removeShoppingItem(id) {
-    await supabaseRequest(SHOPPING_TABLE, `?id=eq.${id}`, { method: 'DELETE' });
-    await loadShoppingList();
+function removeItem(index) {
+    const item = shoppingList[index];
+    if (!item) return;
+    supabaseRequest('lista_compra', `?id=eq.${item.id}`, { method: 'DELETE' })
+        .then(loadShoppingList)
+        .catch(showShoppingError);
 }
 
 async function clearShoppingList() {
-    await supabaseRequest(SHOPPING_TABLE, '?id=not.is.null', { method: 'DELETE' });
+    await supabaseRequest('lista_compra', '?id=not.is.null', { method: 'DELETE' });
     await loadShoppingList();
 }
 
 function renderShoppingList() {
-    document.getElementById('cartCount').textContent = shoppingList.length;
     const listEl = document.getElementById('shoppingList');
-    listEl.innerHTML = shoppingList.map(item => `
-        <li>
-            <span>${item.nombre}</span>
-            <span class="shopping-item-quantity">${item.cantidad}</span>
-            <button class="remove-item-btn" onclick="removeShoppingItem(${item.id})">Quitar</button>
-        </li>
-    `).join('');
+    document.getElementById('cartCount').textContent = shoppingList.length;
+    listEl.innerHTML = shoppingList.map((item, index) =>
+        '<li><span>' + item.nombre + '</span><span class="shopping-item-quantity">' + item.cantidad +
+        '</span><button class="remove-item-btn" onclick="removeItem(' + index + ')">Quitar</button></li>'
+    ).join('');
 }
 
-function showShoppingError(err) {
-    console.error(err);
-    document.getElementById('shoppingStatus').textContent = 'Error: ' + err.message;
+function showShoppingError(error) {
+    console.error('Error en la lista de compra:', error);
+    setShoppingStatus('Error: ' + error.message, true);
 }
 
-// MENÚ SEMANAL
-let recipeToAddToWeek = null;
-function openAddToWeekModal(recipeId) {
-    recipeToAddToWeek = recipeId;
-    const selectDay = document.getElementById('weekDaySelect');
-    selectDay.innerHTML = DAYS.map((d, i) => `<option value="${i + 1}">${d}</option>`).join('');
-    document.getElementById('addToWeekModal').style.display = 'flex';
+function setShoppingStatus(message, isError = false) {
+    const statusEl = document.getElementById('shoppingStatus');
+    if (!statusEl) return;
+    statusEl.textContent = message;
+    statusEl.classList.toggle('shopping-status-error', isError);
 }
 
-function confirmAddToWeek() {
-    if (!recipeToAddToWeek) return;
-    const day = document.getElementById('weekDaySelect').value;
-    const meal = document.getElementById('weekMealSelect').value;
-    const key = `${day}-${meal}`;
-    
-    currentWeeklyPlan[key] = recipeToAddToWeek;
-    closeModal('addToWeekModal');
-    renderWeeklyCalendar();
-    switchTab('semana');
-}
-
-function renderWeeklyCalendar() {
-    const grid = document.getElementById('weeklyCalendarGrid');
-    let html = '';
-
-    DAYS.forEach((dayName, index) => {
-        const dayNum = index + 1;
-        const comidaRecId = currentWeeklyPlan[`${dayNum}-comida`];
-        const cenaRecId = currentWeeklyPlan[`${dayNum}-cena`];
-
-        const comidaRec = recipes.find(r => String(r.id) === String(comidaRecId));
-        const cenaRec = recipes.find(r => String(r.id) === String(cenaRecId));
-
-        html += `
-            <div class="day-card">
-                <h3>${dayName}</h3>
-                <div class="meal-block">
-                    <strong>🌞 Comida:</strong>
-                    ${comidaRec ? `<span>${comidaRec.title}</span> <button class="btn-clear-mini" onclick="removeFromWeek(${dayNum}, 'comida')">✕</button>` : '<em class="empty-meal">Sin asignar</em>'}
-                </div>
-                <div class="meal-block">
-                    <strong>🌙 Cena:</strong>
-                    ${cenaRec ? `<span>${cenaRec.title}</span> <button class="btn-clear-mini" onclick="removeFromWeek(${dayNum}, 'cena')">✕</button>` : '<em class="empty-meal">Sin asignar</em>'}
-                </div>
-            </div>
-        `;
-    });
-
-    grid.innerHTML = html;
-}
-
-function removeFromWeek(day, meal) {
-    delete currentWeeklyPlan[`${day}-${meal}`];
-    renderWeeklyCalendar();
-}
-
-async function saveCurrentWeek() {
-    const keys = Object.keys(currentWeeklyPlan);
-    if (keys.length === 0) {
-        alert('Asigna al menos una receta en la semana antes de guardar.');
-        return;
-    }
-
-    const maxSemana = savedWeeks.reduce((max, w) => w.semana > max ? w.semana : max, 0);
-    const nextSemana = maxSemana + 1;
-
-    const payload = keys.map(k => {
-        const [dia, tipo_comida] = k.split('-');
-        return {
-            semana: nextSemana,
-            dia: parseInt(dia),
-            tipo_comida: tipo_comida,
-            // CAMBIO: 'receta_id' en minúscula
-            receta_id: currentWeeklyPlan[k]
-        };
-    });
-
-    try {
-        await supabaseRequest(SAVED_WEEKS_TABLE, '', {
-            method: 'POST',
-            body: JSON.stringify(payload)
-        });
-        alert(`¡Menú de la Semana #${nextSemana} guardado exitosamente!`);
-        currentWeeklyPlan = {};
-        renderWeeklyCalendar();
-        await loadSavedWeeks();
-    } catch (err) {
-        alert('Error al guardar el menú semanal: ' + err.message);
-    }
-}
-
-// MENÚS GUARDADOS (Visualización y borrado)
-function renderSavedWeeks() {
-    const container = document.getElementById('savedWeeksContainer');
-    if (!savedWeeks || savedWeeks.length === 0) {
-        container.innerHTML = '<p class="empty-state">No hay semanas guardadas en la base de datos.</p>';
-        return;
-    }
-
-    const grouped = {};
-    savedWeeks.forEach(sw => {
-        if (!grouped[sw.semana]) grouped[sw.semana] = [];
-        grouped[sw.semana].push(sw);
-    });
-
-    let html = '';
-    Object.keys(grouped).forEach(semanaNum => {
-        const items = grouped[semanaNum];
-        html += `
-            <div class="saved-week-card">
-                <div class="saved-week-header" onclick="toggleWeekAccordion(${semanaNum})">
-                    <h3>📅 Menú Semanal #${semanaNum} <span id="arrow-${semanaNum}" class="accordion-arrow">▼</span></h3>
-                    <button class="btn btn-delete" onclick="event.stopPropagation(); deleteSavedWeek(${semanaNum})">🗑️ Eliminar</button>
-                </div>
-                
-                <div id="week-content-${semanaNum}" class="saved-week-content" style="display: none;">
-                    <ul class="saved-week-list">
-        `;
-
-        DAYS.forEach((dayName, idx) => {
-            const dayNum = idx + 1;
-            const comida = items.find(i => i.dia === dayNum && i.tipo_comida === 'comida');
-            const cena = items.find(i => i.dia === dayNum && i.tipo_comida === 'cena');
-
-            const recComida = comida ? recipes.find(r => String(r.id) === String(comida.receta_id)) : null;
-            const recCena = cena ? recipes.find(r => String(r.id) === String(cena.receta_id)) : null;
-
-            const nombreComida = recComida ? (recComida.title || recComida.titulo) : '-';
-            const nombreCena = recCena ? (recCena.title || recCena.titulo) : '-';
-
-            html += `
-                        <li class="saved-week-day-item">
-                            <strong class="day-title">${dayName}</strong>
-                            <div class="day-meals">
-                                <div>🌞 <strong>Comida:</strong> <span>${nombreComida}</span></div>
-                                <div>🌙 <strong>Cena:</strong> <span>${nombreCena}</span></div>
-                            </div>
-                        </li>
-            `;
-        });
-
-        html += `
-                    </ul>
-                </div>
-            </div>
-        `;
-    });
-
-    container.innerHTML = html;
-}
-
-function toggleWeekAccordion(semanaNum) {
-    const content = document.getElementById(`week-content-${semanaNum}`);
-    const arrow = document.getElementById(`arrow-${semanaNum}`);
-    
-    if (content.style.display === 'none') {
-        content.style.display = 'block';
-        if (arrow) arrow.textContent = '▲';
-    } else {
-        content.style.display = 'none';
-        if (arrow) arrow.textContent = '▼';
-    }
-}
-
-async function deleteSavedWeek(semanaNum) {
-    if (!confirm(`¿Estás seguro de que deseas eliminar el Menú Semanal #${semanaNum}?`)) return;
-    try {
-        await supabaseRequest(SAVED_WEEKS_TABLE, `?semana=eq.${semanaNum}`, { method: 'DELETE' });
-        savedWeeks = savedWeeks.filter(w => w.semana !== semanaNum);
-        renderSavedWeeks();
-    } catch (err) {
-        alert('Error al eliminar la semana: ' + err.message);
-    }
-}
-
-// Utilidades
 function normalizeText(text) {
-    return String(text || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    return String(text).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 }
 
-async function updateRecipeCategory(recipeId, newCategoryId) {
-    try {
-        const payload = { categoria: newCategoryId ? parseInt(newCategoryId) : null };
-        
-        await supabaseRequest(RECIPES_TABLE, `?id=eq.${recipeId}`, {
-            method: 'PATCH',
-            body: JSON.stringify(payload)
+// -------------------- UTILIDADES DE INTERFAZ --------------------
+
+function setupBackToTop() {
+    const backToTopBtn = document.getElementById('backToTopBtn');
+    window.addEventListener('scroll', () => {
+        backToTopBtn.hidden = window.scrollY < 500;
+    }, { passive: true });
+    backToTopBtn.addEventListener('click', () => {
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+    });
+}
+
+function setupGlobalModalClose() {
+    window.onclick = (e) => {
+        const modals = ['recipeModal', 'shoppingModal', 'favoritesModal', 'addRecipeModal',
+            'categoryManagerModal', 'weeklyMenuModal', 'savedMenusModal', 'confirmModal', 'categoryPickerModal'];
+        modals.forEach(id => {
+            const modal = document.getElementById(id);
+            if (modal && e.target === modal) {
+                if (id === 'shoppingModal') closeShoppingModal();
+                else modal.style.display = 'none';
+            }
         });
-
-        // Actualizamos el objeto local en memoria
-        const recipe = recipes.find(r => r.id === recipeId);
-        if (recipe) {
-            recipe.categoria = newCategoryId ? parseInt(newCategoryId) : null;
-        }
-
-        // Si estamos filtrando por una categoría concreta y cambió, re-renderizamos la vista
-        if (currentCategory !== 'Todas') {
-            renderRecipes();
-        }
-    } catch (err) {
-        alert('Error al actualizar la categoría: ' + err.message);
-        renderRecipes(); // Revertir en caso de error
-    }
+    };
 }

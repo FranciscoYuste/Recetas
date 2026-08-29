@@ -48,7 +48,12 @@ header {
 
 .search-container input,
 .shopping-search-container input,
-.quantity-container input {
+.quantity-container input,
+.admin-form input,
+.admin-form select,
+.admin-form textarea,
+.weekly-add-row input,
+.weekly-add-row select {
     color: var(--text);
     background: var(--surface);
     border: 1px solid var(--gold-border);
@@ -65,7 +70,10 @@ header {
 
 .search-container input:focus,
 .shopping-search-container input:focus,
-.quantity-container input:focus {
+.quantity-container input:focus,
+.admin-form input:focus,
+.admin-form select:focus,
+.admin-form textarea:focus {
     border-color: var(--primary-hover);
     box-shadow: 0 0 0 2px rgba(212, 175, 55, 0.15);
 }
@@ -96,6 +104,29 @@ header {
     background: var(--primary);
     color: #0b0b0b;
     border-color: var(--primary);
+}
+
+.admin-actions {
+    display: flex;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 16px;
+}
+
+.btn-admin {
+    background: var(--surface-soft);
+    color: var(--primary-hover);
+    border: 1px solid var(--gold-border);
+    padding: 8px 14px;
+    border-radius: 20px;
+    cursor: pointer;
+    font: bold 0.85rem Georgia, 'Times New Roman', serif;
+}
+
+.btn-admin:hover {
+    background: var(--primary);
+    color: #0b0b0b;
 }
 
 .main-layout,
@@ -132,6 +163,53 @@ header {
     font-weight: bold;
 }
 
+.badge-btn {
+    font-family: inherit;
+    cursor: pointer;
+}
+
+.badge-btn:hover {
+    background: var(--primary);
+    color: #0b0b0b;
+    border-color: var(--primary);
+}
+
+.category-picker-content {
+    max-width: 420px;
+}
+
+.category-picker-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 14px;
+    max-height: 50vh;
+    overflow-y: auto;
+}
+
+.category-picker-option {
+    padding: 10px 12px;
+    background: var(--surface-soft);
+    border: 1px solid #39342a;
+    border-radius: 4px;
+    color: var(--text);
+    cursor: pointer;
+    text-align: left;
+    font: 0.95rem Georgia, 'Times New Roman', serif;
+}
+
+.category-picker-option:hover {
+    border-color: var(--primary-hover);
+    color: var(--primary-hover);
+}
+
+.category-picker-option.active {
+    background: var(--primary);
+    color: #0b0b0b;
+    border-color: var(--primary);
+    font-weight: bold;
+}
+
 .card h3 {
     margin: 10px 0;
     color: var(--text);
@@ -139,8 +217,17 @@ header {
 
 .card-actions {
     display: flex;
-    gap: 10px;
+    gap: 0.5rem;
+    align-items: center;
     margin-top: 15px;
+}
+
+.card-actions .favorite-btn {
+    flex-shrink: 0;
+}
+
+.card-actions .btn {
+    flex-grow: 1;
 }
 
 .btn {
@@ -165,6 +252,7 @@ header {
 .btn-secondary {
     background: var(--surface-soft);
     color: var(--text);
+    border: 1px solid var(--gold-border);
 }
 
 .floating-shopping-btn {
@@ -180,6 +268,25 @@ header {
     cursor: pointer;
     font: bold 0.9rem Georgia, 'Times New Roman', serif;
     box-shadow: 0 4px 18px rgba(0, 0, 0, 0.5);
+}
+
+.floating-favorites-btn {
+    position: fixed;
+    right: 20px;
+    bottom: 20px;
+    z-index: 900;
+    padding: 10px 16px;
+    background: #d4af37;
+    border: none;
+    border-radius: 30px;
+    color: #0b0b0b;
+    cursor: pointer;
+    font: bold 0.9rem Georgia, 'Times New Roman', serif;
+    box-shadow: 0 4px 18px rgba(0, 0, 0, 0.5);
+}
+
+.floating-favorites-btn:hover {
+    background: #f0cf68;
 }
 
 .back-to-top-btn {
@@ -235,12 +342,15 @@ header {
     border-radius: 5px;
 }
 
-.shopping-modal-content {
+.shopping-modal-content,
+.weekly-modal-content {
     max-width: 900px;
     max-height: 90vh;
 }
 
-.shopping-modal-content h2 {
+.shopping-modal-content h2,
+.weekly-modal-content h2,
+.favorites-modal-content h2 {
     margin-top: 0;
     padding-right: 30px;
     color: var(--primary-hover);
@@ -388,8 +498,6 @@ header {
 }
 
 .btn-clear {
-    width: 100%;
-    margin-top: 14px;
     padding: 10px;
     background: #8f3028;
     border: none;
@@ -429,6 +537,12 @@ header {
         min-height: 130px;
         max-height: 38vh;
     }
+
+    .floating-favorites-btn {
+        right: 12px;
+        bottom: 12px;
+        padding: 11px 14px;
+    }
 }
 
 .favorite-btn {
@@ -449,6 +563,22 @@ header {
     color: #ffd700;
 }
 
+.delete-recipe-btn {
+    flex-shrink: 0;
+    background: none;
+    border: 1px solid #8f3028;
+    border-radius: 4px;
+    color: #f28b82;
+    font-size: 1.1em;
+    cursor: pointer;
+    padding: 0.25rem 0.5rem;
+}
+
+.delete-recipe-btn:hover {
+    background: #8f3028;
+    color: #fff;
+}
+
 .empty-state {
     grid-column: 1 / -1;
     text-align: center;
@@ -461,54 +591,11 @@ header {
     font-size: 1.1rem;
 }
 
-.card-actions {
-    display: flex;
-    gap: 0.5rem;
-    align-items: center;
-}
-
-.card-actions .favorite-btn {
-    flex-shrink: 0;
-}
-
-.card-actions .btn {
-    flex-grow: 1;
-}
-
-
-
-/* Bot�n Flotante de Favoritos */
-.floating-favorites-btn {
-    position: fixed;
-    right: 20px;
-    bottom: 20px;
-    z-index: 900;
-    padding: 10px 16px;
-    background: #d4af37;
-    border: none;
-    border-radius: 30px;
-    color: #0b0b0b;
-    cursor: pointer;
-    font: bold 0.9rem Georgia, 'Times New Roman', serif;
-    box-shadow: 0 4px 18px rgba(0, 0, 0, 0.5);
-}
-
-.floating-favorites-btn:hover {
-    background: #f0cf68;
-}
-
-/* Modal de Favoritos */
 .favorites-modal-content {
     max-width: 900px;
     max-height: 90vh;
     display: flex;
     flex-direction: column;
-}
-
-.favorites-modal-content h2 {
-    margin-top: 0;
-    padding-right: 30px;
-    color: #f0cf68;
 }
 
 .favorites-search-container {
@@ -528,7 +615,6 @@ header {
     overflow-y: auto;
 }
 
-/* Scroll horizontal para filtros de favoritos */
 #favoritesFilters {
     flex-wrap: nowrap !important;
     overflow-x: auto;
@@ -544,291 +630,274 @@ header {
     flex-shrink: 0;
 }
 
-@media (max-width: 700px) {
-    .floating-favorites-btn {
-        right: 12px;
-        bottom: 12px;
-        padding: 11px 14px;
-    }
-}
+/* ---------- Ficha de receta: admin (categoría / eliminar) ---------- */
 
-/* Pestañas de Navegación Superior */
-.main-tabs {
+.recipe-admin-row {
     display: flex;
-    justify-content: center;
-    gap: 10px;
-    margin-top: 15px;
-}
-
-.tab-btn {
-    padding: 10px 20px;
-    background: var(--surface-soft);
-    border: 1px solid var(--gold-border);
-    color: var(--text);
-    border-radius: 20px;
-    cursor: pointer;
-    font: bold 0.95rem Georgia, 'Times New Roman', serif;
-}
-
-.tab-btn.active, .tab-btn:hover {
-    background: var(--primary);
-    color: #0b0b0b;
-}
-
-.top-bar-actions {
-    display: flex;
-    gap: 10px;
-    justify-content: center;
-    align-items: center;
     flex-wrap: wrap;
-    margin-bottom: 15px;
+    align-items: center;
+    gap: 8px;
+    margin: 12px 0 18px;
+    padding: 12px;
+    background: var(--surface);
+    border: 1px solid #39342a;
+    border-radius: 4px;
 }
 
-/* Formularios dentro de Modales */
-.form-group {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    margin-top: 12px;
-}
-
-.form-group label {
+.recipe-admin-row label {
     color: var(--muted-text);
     font-weight: bold;
+    font-size: 0.85rem;
 }
 
-.form-group input, .form-group select, .form-group textarea {
-    background: var(--surface);
-    border: 1px solid var(--gold-border);
-    color: var(--text);
+.recipe-admin-row select {
+    padding: 6px 8px;
+    border-radius: 4px;
+}
+
+.recipe-admin-row .btn-clear {
+    margin-left: auto;
+}
+
+/* ---------- Formularios de administración (añadir receta / categorías) ---------- */
+
+.admin-form {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-bottom: 16px;
+}
+
+.admin-form label {
+    color: var(--muted-text);
+    font-weight: bold;
+    font-size: 0.85rem;
+    margin-top: 8px;
+}
+
+.admin-form input,
+.admin-form select,
+.admin-form textarea {
+    width: 100%;
     padding: 10px;
     border-radius: 4px;
-    font: 1rem Georgia, serif;
+    font: 15px Georgia, 'Times New Roman', serif;
+    resize: vertical;
 }
 
-.btn-delete {
-    background: #8f3028;
-    color: white;
+.admin-form button {
+    margin-top: 14px;
 }
 
-.btn-delete:hover {
-    background: #b94035;
-}
-
-.add-cat-form {
+.category-manager-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
     display: flex;
-    gap: 10px;
+    flex-direction: column;
+    gap: 8px;
+    max-height: 40vh;
+    overflow-y: auto;
 }
 
-.add-cat-form input {
-    flex: 1;
-    background: var(--surface);
-    border: 1px solid var(--gold-border);
-    color: var(--text);
-    padding: 8px;
-    border-radius: 4px;
-}
-
-/* Calendario del Menú Semanal */
-.weekly-header {
+.category-manager-list li {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 20px;
+    padding: 10px 12px;
+    background: var(--surface);
+    border: 1px solid #39342a;
+    border-radius: 4px;
 }
 
-.weekly-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-    gap: 15px;
+.category-manager-list li button {
+    padding: 6px 10px;
 }
 
-.day-card {
-    background: var(--card-bg);
-    border: 1px solid var(--gold-border);
-    border-radius: 6px;
-    padding: 15px;
+/* ---------- Añadir al menú semanal desde la ficha de receta ---------- */
+
+.weekly-add-panel {
+    margin-top: 20px;
+    padding: 14px;
+    background: var(--surface);
+    border: 1px solid #39342a;
+    border-radius: 4px;
 }
 
-.day-card h3 {
+.weekly-add-panel h3 {
     margin-top: 0;
     color: var(--primary-hover);
-    border-bottom: 1px solid #302c24;
+}
+
+.weekly-add-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+}
+
+.weekly-add-row select,
+.weekly-add-row input {
+    padding: 8px;
+    border-radius: 4px;
+    flex: 1 1 140px;
+}
+
+.weekly-add-hint {
+    margin: 8px 0 0;
+    color: var(--muted-text);
+    font-size: 0.8rem;
+}
+
+/* ---------- Calendario semanal ---------- */
+
+.weekly-grid-wrapper {
+    overflow-x: auto;
+    margin: 16px 0;
+}
+
+/* Vista de escritorio: tabla Comida/Cena x Días */
+.weekly-grid-table {
+    width: 100%;
+    border-collapse: collapse;
+    min-width: 700px;
+}
+
+.weekly-grid-table th,
+.weekly-grid-table td {
+    border: 1px solid #39342a;
+    padding: 10px;
+    text-align: center;
+    font-size: 0.85rem;
+}
+
+.weekly-grid-table th {
+    background: var(--surface-soft);
+    color: var(--primary-hover);
+}
+
+.weekly-row-label {
+    background: var(--surface-soft);
+    color: var(--primary-hover);
+    font-weight: bold;
+}
+
+.weekly-cell.filled {
+    background: rgba(212, 175, 55, 0.12);
+    color: var(--text);
+}
+
+.weekly-cell.empty {
+    color: var(--muted-text);
+}
+
+.weekly-cell .remove-item-btn {
+    margin-left: 6px;
+    padding: 2px 7px;
+}
+
+/* Vista de móvil: tarjetas verticales, una por día */
+.weekly-grid-mobile {
+    display: none;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.weekly-day-card {
+    background: var(--surface);
+    border: 1px solid #39342a;
+    border-radius: 6px;
+    padding: 12px 14px;
+}
+
+.weekly-day-card h4 {
+    margin: 0 0 8px;
+    color: var(--primary-hover);
+    border-bottom: 1px solid var(--gold-border);
     padding-bottom: 6px;
 }
 
-.meal-block {
-    margin-top: 10px;
+.weekly-day-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+    padding: 6px 0;
     font-size: 0.9rem;
 }
 
-.meal-block span {
-    color: var(--text);
-    display: inline-block;
-    margin-top: 3px;
-}
-
-.empty-meal {
+.weekly-day-meal-label {
     color: var(--muted-text);
-    font-size: 0.85rem;
-}
-
-.btn-clear-mini {
-    background: transparent;
-    border: none;
-    color: #e74c3c;
-    cursor: pointer;
     font-weight: bold;
+    flex-shrink: 0;
 }
 
-/* Menús Semanales Guardados */
-.saved-week-card {
-    background: var(--surface);
-    border: 1px solid var(--gold-border);
-    border-radius: 6px;
-    padding: 20px;
-    margin-bottom: 25px;
+.weekly-day-meal-value {
+    text-align: right;
 }
 
-.saved-week-header {
+@media (max-width: 700px) {
+    .weekly-grid-wrapper {
+        overflow-x: visible;
+    }
+
+    .weekly-grid-table {
+        display: none;
+    }
+
+    .weekly-grid-mobile {
+        display: flex;
+    }
+}
+
+.weekly-actions {
     display: flex;
-    justify-content: space-between;
-    align-items: center;
-    border-bottom: 1px solid var(--gold-border);
-    padding-bottom: 10px;
-    margin-bottom: 15px;
-}
-
-.saved-week-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
     gap: 10px;
+    justify-content: flex-end;
 }
 
-.day-summary {
-    background: var(--card-bg);
-    padding: 10px;
-    border-radius: 4px;
-    font-size: 0.85rem;
-}
+/* ---------- Menús guardados ---------- */
 
-.day-summary strong {
-    color: var(--primary-hover);
-    display: block;
-    margin-bottom: 5px;
-}
-
-.day-summary p {
-    margin: 3px 0;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-
-/* Estilos para el Acordeón de Menús Guardados */
-.saved-week-card {
-    background: var(--surface);
-    border: 1px solid var(--gold-border);
-    border-radius: 6px;
-    margin-bottom: 12px;
-    overflow: hidden;
-}
-
-.saved-week-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 14px 18px;
-    background: var(--surface-soft);
-    cursor: pointer;
-    user-select: none;
-    transition: background-color 0.2s ease;
-}
-
-.saved-week-header:hover {
-    background: #252525;
-}
-
-.saved-week-header h3 {
-    margin: 0;
-    font-size: 1.1rem;
-    color: var(--primary-hover);
-    display: flex;
-    align-items: center;
-    gap: 10px;
-}
-
-.accordion-arrow {
-    font-size: 0.85rem;
-    color: var(--muted-text);
-    transition: transform 0.2s ease;
-}
-
-.saved-week-content {
-    padding: 16px;
-    border-top: 1px solid var(--gold-border);
-    background: var(--bg);
-}
-
-.saved-week-list {
-    list-style: none;
-    padding: 0;
-    margin: 0;
+.saved-menus-list {
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    gap: 8px;
+    margin-bottom: 20px;
 }
 
-.saved-week-day-item {
-    padding: 12px 16px;
-    background: var(--card-bg);
-    border: 1px solid #302c24;
-    border-radius: 4px;
-}
-
-.day-title {
-    display: block;
-    color: var(--primary);
-    margin-bottom: 6px;
-    font-size: 1.05rem;
-}
-
-.day-meals {
-    font-size: 0.95rem;
-    color: var(--text);
-    line-height: 1.6;
-    word-break: break-word;
-}
-
-.day-meals div {
-    margin: 2px 0;
-}
-
-.day-meals span {
-    color: var(--muted-text);
-}
-
-/* Selector de categoría integrado en la tarjeta */
-.badge-select {
-    background: var(--surface-soft);
-    color: var(--primary-hover);
-    border: 1px solid var(--gold-border);
-    padding: 4px 8px;
-    border-radius: 4px;
-    font-size: 0.8rem;
-    font-weight: 600;
-    cursor: pointer;
-    outline: none;
-    margin-bottom: 8px;
-    transition: all 0.2s ease;
-}
-
-.badge-select:hover {
-    background: #252525;
-    border-color: var(--primary);
-}
-
-.badge-select option {
+.saved-menu-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px;
     background: var(--surface);
-    color: var(--text);
+    border: 1px solid #39342a;
+    border-radius: 4px;
+}
+
+.saved-menu-item div {
+    display: flex;
+    gap: 8px;
+}
+
+/* ---------- Modal de confirmación ---------- */
+
+.confirm-modal-content {
+    max-width: 420px;
+    text-align: center;
+}
+
+#confirmModal {
+    z-index: 1100;
+}
+
+.confirm-modal-content p {
+    font-size: 1.05rem;
+    margin-bottom: 20px;
+}
+
+.confirm-actions {
+    display: flex;
+    justify-content: center;
+    gap: 12px;
 }
