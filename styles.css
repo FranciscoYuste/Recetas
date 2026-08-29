@@ -551,3 +551,284 @@ header {
         padding: 11px 14px;
     }
 }
+
+/* Pestañas de Navegación Superior */
+.main-tabs {
+    display: flex;
+    justify-content: center;
+    gap: 10px;
+    margin-top: 15px;
+}
+
+.tab-btn {
+    padding: 10px 20px;
+    background: var(--surface-soft);
+    border: 1px solid var(--gold-border);
+    color: var(--text);
+    border-radius: 20px;
+    cursor: pointer;
+    font: bold 0.95rem Georgia, 'Times New Roman', serif;
+}
+
+.tab-btn.active, .tab-btn:hover {
+    background: var(--primary);
+    color: #0b0b0b;
+}
+
+.top-bar-actions {
+    display: flex;
+    gap: 10px;
+    justify-content: center;
+    align-items: center;
+    flex-wrap: wrap;
+    margin-bottom: 15px;
+}
+
+/* Formularios dentro de Modales */
+.form-group {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-top: 12px;
+}
+
+.form-group label {
+    color: var(--muted-text);
+    font-weight: bold;
+}
+
+.form-group input, .form-group select, .form-group textarea {
+    background: var(--surface);
+    border: 1px solid var(--gold-border);
+    color: var(--text);
+    padding: 10px;
+    border-radius: 4px;
+    font: 1rem Georgia, serif;
+}
+
+.btn-delete {
+    background: #8f3028;
+    color: white;
+}
+
+.btn-delete:hover {
+    background: #b94035;
+}
+
+.add-cat-form {
+    display: flex;
+    gap: 10px;
+}
+
+.add-cat-form input {
+    flex: 1;
+    background: var(--surface);
+    border: 1px solid var(--gold-border);
+    color: var(--text);
+    padding: 8px;
+    border-radius: 4px;
+}
+
+/* Calendario del Menú Semanal */
+.weekly-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+}
+
+.weekly-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    gap: 15px;
+}
+
+.day-card {
+    background: var(--card-bg);
+    border: 1px solid var(--gold-border);
+    border-radius: 6px;
+    padding: 15px;
+}
+
+.day-card h3 {
+    margin-top: 0;
+    color: var(--primary-hover);
+    border-bottom: 1px solid #302c24;
+    padding-bottom: 6px;
+}
+
+.meal-block {
+    margin-top: 10px;
+    font-size: 0.9rem;
+}
+
+.meal-block span {
+    color: var(--text);
+    display: inline-block;
+    margin-top: 3px;
+}
+
+.empty-meal {
+    color: var(--muted-text);
+    font-size: 0.85rem;
+}
+
+.btn-clear-mini {
+    background: transparent;
+    border: none;
+    color: #e74c3c;
+    cursor: pointer;
+    font-weight: bold;
+}
+
+/* Menús Semanales Guardados */
+.saved-week-card {
+    background: var(--surface);
+    border: 1px solid var(--gold-border);
+    border-radius: 6px;
+    padding: 20px;
+    margin-bottom: 25px;
+}
+
+.saved-week-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid var(--gold-border);
+    padding-bottom: 10px;
+    margin-bottom: 15px;
+}
+
+.saved-week-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+    gap: 10px;
+}
+
+.day-summary {
+    background: var(--card-bg);
+    padding: 10px;
+    border-radius: 4px;
+    font-size: 0.85rem;
+}
+
+.day-summary strong {
+    color: var(--primary-hover);
+    display: block;
+    margin-bottom: 5px;
+}
+
+.day-summary p {
+    margin: 3px 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* Estilos para el Acordeón de Menús Guardados */
+.saved-week-card {
+    background: var(--surface);
+    border: 1px solid var(--gold-border);
+    border-radius: 6px;
+    margin-bottom: 12px;
+    overflow: hidden;
+}
+
+.saved-week-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 14px 18px;
+    background: var(--surface-soft);
+    cursor: pointer;
+    user-select: none;
+    transition: background-color 0.2s ease;
+}
+
+.saved-week-header:hover {
+    background: #252525;
+}
+
+.saved-week-header h3 {
+    margin: 0;
+    font-size: 1.1rem;
+    color: var(--primary-hover);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.accordion-arrow {
+    font-size: 0.85rem;
+    color: var(--muted-text);
+    transition: transform 0.2s ease;
+}
+
+.saved-week-content {
+    padding: 16px;
+    border-top: 1px solid var(--gold-border);
+    background: var(--bg);
+}
+
+.saved-week-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.saved-week-day-item {
+    padding: 12px 16px;
+    background: var(--card-bg);
+    border: 1px solid #302c24;
+    border-radius: 4px;
+}
+
+.day-title {
+    display: block;
+    color: var(--primary);
+    margin-bottom: 6px;
+    font-size: 1.05rem;
+}
+
+.day-meals {
+    font-size: 0.95rem;
+    color: var(--text);
+    line-height: 1.6;
+    word-break: break-word;
+}
+
+.day-meals div {
+    margin: 2px 0;
+}
+
+.day-meals span {
+    color: var(--muted-text);
+}
+
+/* Selector de categoría integrado en la tarjeta */
+.badge-select {
+    background: var(--surface-soft);
+    color: var(--primary-hover);
+    border: 1px solid var(--gold-border);
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    cursor: pointer;
+    outline: none;
+    margin-bottom: 8px;
+    transition: all 0.2s ease;
+}
+
+.badge-select:hover {
+    background: #252525;
+    border-color: var(--primary);
+}
+
+.badge-select option {
+    background: var(--surface);
+    color: var(--text);
+}

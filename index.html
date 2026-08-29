@@ -13,31 +13,43 @@
         <h1 class="site-title">
             <img src="img/BannerRecetas.png" alt="Recetario Digital">
         </h1>
-        <div class="search-container">
-            <input type="text" id="searchInput" placeholder="🔍 Buscar por título...">
-        </div>
-        <nav class="categories-bar" id="categoryFilters">
-            <button class="active" data-cat="Todas">Todas</button>
-
-            <button data-cat="Carnes">🥩 Carnes</button>
-            <button data-cat="Pescados y Mariscos">🐟 Pescados</button>
-            <button data-cat="Pastas">🍝 Pastas</button>
-            <button data-cat="Ensaladas">🥗 Ensaladas</button>
-            <button data-cat="Sopas y Cremas">🍲 Sopas y Cremas</button>
-            <button data-cat="Postres">🍰 Postres</button>
+        <nav class="main-tabs">
+            <button id="navRecetas" class="tab-btn active">📖 Recetas</button>
+            <button id="navSemana" class="tab-btn">📅 Plan Semanal</button>
+            <button id="navGuardados" class="tab-btn">📁 Menús Guardados</button>
         </nav>
     </header>
 
-    <main class="main-layout">
-        <section class="recipes-grid" id="recipesGrid"></section>
+    <main id="viewRecetas" class="main-layout">
+        <div class="top-bar-actions">
+            <div class="search-container">
+                <input type="text" id="searchInput" placeholder="🔍 Buscar por título...">
+            </div>
+            <button id="openAddRecipeBtn" class="btn btn-primary">➕ Nueva Receta</button>
+            <button id="openCategoriesBtn" class="btn btn-secondary">🏷️ Gestionar Categorías</button>
+        </div>
+
+        <nav class="categories-bar" id="categoryFilters"></nav>
+        <section class="recipes-grid" id="recipesGrid" style="margin-top: 20px;"></section>
     </main>
 
-    <button id="backToTopBtn" class="back-to-top-btn" type="button" aria-label="Volver al buscador y las categorías"
-        hidden>
+    <main id="viewSemana" class="main-layout" style="display: none;">
+        <div style="display: flex; align-items: center; gap: 15px;">
+            <h2>📅 Menú Semanal</h2>
+            <button id="saveWeekBtn" class="btn btn-primary">💾 Guardar Menú Semanal</button>
+        </div>
+        <div id="weeklyCalendarGrid" class="weekly-grid"></div>
+    </main>
+
+    <main id="viewGuardados" class="main-layout" style="display: none;">
+        <h2>📁 Menús Semanales Guardados</h2>
+        <div id="savedWeeksContainer"></div>
+    </main>
+
+    <button id="backToTopBtn" class="back-to-top-btn" type="button" hidden>
         ↑ <span>Arriba</span>
     </button>
 
-    <!-- Botones Flotantes -->
     <button id="openShoppingBtn" class="floating-shopping-btn">
         🛒 Lista (<span id="cartCount">0</span>)
     </button>
@@ -46,56 +58,40 @@
         🌟 Mis Favoritos (<span id="favoritesCount">0</span>)
     </button>
 
-    <!-- Modal de Favoritos -->
     <div id="favoritesModal" class="modal">
         <div class="modal-content favorites-modal-content">
             <span class="close-btn" id="closeFavoritesModal">&times;</span>
             <h2>🌟 Mis Recetas Favoritas</h2>
-
             <div class="favorites-search-container">
                 <input type="text" id="favoritesSearchInput" placeholder="🔍 Buscar en favoritas...">
             </div>
-
-            <nav class="categories-bar" id="favoritesFilters">
-                <button class="active" data-cat="Todas">Todas</button>
-                <button data-cat="Carnes">🥩 Carnes</button>
-                <button data-cat="Pescados y Mariscos">🐟 Pescados</button>
-                <button data-cat="Pastas">🍝 Pastas</button>
-                <button data-cat="Ensaladas">🥗 Ensaladas</button>
-                <button data-cat="Sopas y Cremas">🍲 Sopas y Cremas</button>
-                <button data-cat="Postres">🍰 Postres</button>
-            </nav>
-
-            <section id="favoritesGrid" class="recipes-grid"></section>
+            <section id="favoritesGrid" class="recipes-grid" style="margin-top: 15px;"></section>
         </div>
     </div>
 
-    <!-- Modal de la Lista de la Compra -->
     <div id="shoppingModal" class="modal">
         <div class="modal-content shopping-modal-content">
             <span class="close-btn" id="closeShoppingModal">&times;</span>
             <h2>🛒 Lista de la Compra</h2>
             <p id="shoppingStatus" role="status" aria-live="polite"></p>
-
             <div class="shopping-workspace">
-                <section class="shopping-add-panel" aria-labelledby="shoppingAddTitle">
-                    <h3 id="shoppingAddTitle">Añadir productos</h3>
+                <section class="shopping-add-panel">
+                    <h3>Añadir productos</h3>
                     <div class="shopping-search-container">
                         <label for="shoppingSearchInput">Buscar producto</label>
-                        <input type="search" id="shoppingSearchInput" placeholder="Ej.: tomates, leche..."
-                            autocomplete="off">
+                        <input type="search" id="shoppingSearchInput" placeholder="Ej.: tomates, leche..." autocomplete="off">
                         <div id="shoppingSearchResults" class="shopping-search-results"></div>
                     </div>
 
                     <div id="quantityContainer" class="quantity-container" hidden>
                         <span id="selectedProductName"></span>
-                        <input type="number" id="shoppingQuantity" min="1" step="1" value="1" aria-label="Cantidad">
+                        <input type="number" id="shoppingQuantity" min="1" step="1" value="1">
                         <button id="addShoppingItemBtn" class="btn btn-primary">Añadir</button>
                     </div>
                 </section>
 
-                <section class="shopping-list-panel" aria-labelledby="shoppingListTitle">
-                    <h3 id="shoppingListTitle">Tu lista</h3>
+                <section class="shopping-list-panel">
+                    <h3>Tu lista</h3>
                     <ul id="shoppingList" class="shopping-list"></ul>
                     <button id="clearListBtn" class="btn-clear">Vaciar Lista</button>
                 </section>
@@ -103,7 +99,6 @@
         </div>
     </div>
 
-    <!-- Modal para ver la receta completa -->
     <div id="recipeModal" class="modal">
         <div class="modal-content">
             <span class="close-btn" id="closeModal">&times;</span>
@@ -114,6 +109,78 @@
             <h3>Pasos de Preparación</h3>
             <div id="modalSteps"></div>
             <p id="modalUrlWrapper" style="margin-top: 15px;"></p>
+        </div>
+    </div>
+
+    <div id="addRecipeModal" class="modal">
+        <div class="modal-content">
+            <span class="close-btn" id="closeAddRecipeModal">&times;</span>
+            <h2>➕ Añadir Nueva Receta</h2>
+            <form id="addRecipeForm">
+                <div class="form-group">
+                    <label>Título:</label>
+                    <input type="text" id="addRecipeTitle" required>
+                </div>
+                <div class="form-group">
+                    <label>Categoría:</label>
+                    <select id="addRecipeCategory" required></select>
+                </div>
+                <div class="form-group">
+                    <label>Ingredientes (un ingrediente por línea):</label>
+                    <textarea id="addRecipeIngredients" rows="4" required></textarea>
+                </div>
+                <div class="form-group">
+                    <label>Pasos de preparación:</label>
+                    <textarea id="addRecipeSteps" rows="4" required></textarea>
+                </div>
+                <div class="form-group">
+                    <label>URL (opcional):</label>
+                    <input type="url" id="addRecipeUrl">
+                </div>
+                <button type="submit" class="btn btn-primary" style="width: 100%; margin-top: 15px;">Guardar Receta</button>
+            </form>
+        </div>
+    </div>
+
+    <div id="categoriesModal" class="modal">
+        <div class="modal-content">
+            <span class="close-btn" id="closeCategoriesModal">&times;</span>
+            <h2>🏷️ Gestionar Categorías</h2>
+            <div class="add-cat-form">
+                <input type="text" id="newCategoryName" placeholder="Nueva categoría...">
+                <button id="addCategoryBtn" class="btn btn-primary">Añadir</button>
+            </div>
+            <ul id="categoriesList" class="shopping-list" style="margin-top: 15px;"></ul>
+        </div>
+    </div>
+
+    <div id="addToWeekModal" class="modal">
+        <div class="modal-content">
+            <span class="close-btn" id="closeAddToWeekModal">&times;</span>
+            <h2>📅 Añadir Receta a la Semana</h2>
+            <div class="form-group">
+                <label>Día de la semana:</label>
+                <select id="weekDaySelect"></select>
+            </div>
+            <div class="form-group">
+                <label>Momento del día:</label>
+                <select id="weekMealSelect">
+                    <option value="comida">🌞 Comida</option>
+                    <option value="cena">🌙 Cena</option>
+                </select>
+            </div>
+            <button id="confirmAddToWeekBtn" class="btn btn-primary" style="width: 100%; margin-top: 15px;">Asignar al Menú</button>
+        </div>
+    </div>
+
+    <div id="confirmDeleteModal" class="modal">
+        <div class="modal-content">
+            <h2>⚠️ Confirmar Eliminación</h2>
+            <p>¿Seguro que quiere eliminar la receta de su base de datos?</p>
+            <div style="display: flex; gap: 10px; margin-top: 20px;">
+                <button id="confirmDeleteBtn" class="btn btn-clear" style="flex: 1;">Sí, Eliminar</button>
+                <button id="cancelDeleteBtn" class="btn btn-secondary" style="flex: 1;">Cancelar</button>
+            </div>
         </div>
     </div>
 
