@@ -170,7 +170,7 @@ header {
 .floating-shopping-btn {
     position: fixed;
     right: 20px;
-    bottom: 20px;
+    bottom: 100px;
     z-index: 900;
     padding: 14px 22px;
     background: var(--primary);
@@ -428,5 +428,110 @@ header {
     .shopping-list {
         min-height: 130px;
         max-height: 38vh;
+    }
+}
+
+.favorite-btn {
+    background: none;
+    border: none;
+    font-size: 1.5em;
+    cursor: pointer;
+    padding: 0.25rem;
+    transition: transform 0.2s ease;
+    color: var(--muted-text);
+}
+
+.favorite-btn:hover {
+    transform: scale(1.2);
+}
+
+.favorite-btn.active {
+    color: #ffd700;
+}
+
+.empty-state {
+    grid-column: 1 / -1;
+    text-align: center;
+    padding: 3rem;
+    color: var(--muted-text);
+}
+
+.empty-state p {
+    margin: 0.5rem 0;
+    font-size: 1.1rem;
+}
+
+.card-actions {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+}
+
+.card-actions .favorite-btn {
+    flex-shrink: 0;
+}
+
+.card-actions .btn {
+    flex-grow: 1;
+}
+
+
+
+/* Bot�n Flotante de Favoritos */
+.floating-favorites-btn {
+    position: fixed;
+    right: 20px;
+    bottom: 20px;
+    z-index: 900;
+    padding: 14px 22px;
+    background: #d4af37;
+    border: none;
+    border-radius: 30px;
+    color: #0b0b0b;
+    cursor: pointer;
+    font: bold 1rem Georgia, 'Times New Roman', serif;
+    box-shadow: 0 4px 18px rgba(0, 0, 0, 0.5);
+}
+
+.floating-favorites-btn:hover {
+    background: #f0cf68;
+}
+
+/* Modal de Favoritos */
+.favorites-modal-content {
+    max-width: 900px;
+    max-height: 90vh;
+    display: flex;
+    flex-direction: column;
+}
+
+.favorites-modal-content h2 {
+    margin-top: 0;
+    padding-right: 30px;
+    color: #f0cf68;
+}
+
+.favorites-search-container {
+    margin-bottom: 20px;
+}
+
+.favorites-search-container input {
+    width: 100%;
+    max-width: 450px;
+    padding: 12px 20px;
+    border-radius: 25px;
+    font: 16px Georgia, 'Times New Roman', serif;
+}
+
+.favorites-modal-content .recipes-grid {
+    flex: 1;
+    overflow-y: auto;
+}
+
+@media (max-width: 700px) {
+    .floating-favorites-btn {
+        right: 12px;
+        bottom: 12px;
+        padding: 11px 14px;
     }
 }

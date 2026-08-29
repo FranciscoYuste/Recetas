@@ -18,6 +18,7 @@
         </div>
         <nav class="categories-bar" id="categoryFilters">
             <button class="active" data-cat="Todas">Todas</button>
+
             <button data-cat="Carnes">🥩 Carnes</button>
             <button data-cat="Pescados y Mariscos">🐟 Pescados</button>
             <button data-cat="Pastas">🍝 Pastas</button>
@@ -36,10 +37,38 @@
         ↑ <span>Arriba</span>
     </button>
 
-    <!-- Botón Flotante para abrir la Lista de la Compra -->
+    <!-- Botones Flotantes -->
     <button id="openShoppingBtn" class="floating-shopping-btn">
         🛒 Lista (<span id="cartCount">0</span>)
     </button>
+
+    <button id="openFavoritesBtn" class="floating-favorites-btn">
+        🌟 Mis Favoritos (<span id="favoritesCount">0</span>)
+    </button>
+
+    <!-- Modal de Favoritos -->
+    <div id="favoritesModal" class="modal">
+        <div class="modal-content favorites-modal-content">
+            <span class="close-btn" id="closeFavoritesModal">&times;</span>
+            <h2>🌟 Mis Recetas Favoritas</h2>
+
+            <div class="favorites-search-container">
+                <input type="text" id="favoritesSearchInput" placeholder="🔍 Buscar en favoritas...">
+            </div>
+
+            <nav class="categories-bar" id="favoritesFilters">
+                <button class="active" data-cat="Todas">Todas</button>
+                <button data-cat="Carnes">🥩 Carnes</button>
+                <button data-cat="Pescados y Mariscos">🐟 Pescados</button>
+                <button data-cat="Pastas">🍝 Pastas</button>
+                <button data-cat="Ensaladas">🥗 Ensaladas</button>
+                <button data-cat="Sopas y Cremas">🍲 Sopas y Cremas</button>
+                <button data-cat="Postres">🍰 Postres</button>
+            </nav>
+
+            <section id="favoritesGrid" class="recipes-grid"></section>
+        </div>
+    </div>
 
     <!-- Modal de la Lista de la Compra -->
     <div id="shoppingModal" class="modal">
