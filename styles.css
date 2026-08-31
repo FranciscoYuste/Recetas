@@ -579,6 +579,26 @@ header {
     color: #fff;
 }
 
+.edit-title-btn {
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 0.75em;
+    opacity: 0.75;
+    padding: 0 2px;
+    vertical-align: middle;
+}
+
+.edit-title-btn:hover {
+    opacity: 1;
+    transform: scale(1.1);
+}
+
+.product-manager-open-btn {
+    width: 100%;
+    margin-top: 12px;
+}
+
 .empty-state {
     grid-column: 1 / -1;
     text-align: center;

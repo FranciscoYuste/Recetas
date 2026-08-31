@@ -87,6 +87,9 @@
                         <input type="number" id="shoppingQuantity" min="1" step="1" value="1" aria-label="Cantidad">
                         <button id="addShoppingItemBtn" class="btn btn-primary">Añadir</button>
                     </div>
+
+                    <button id="openProductManagerBtn" class="btn btn-secondary product-manager-open-btn"
+                        type="button">🛠️ Gestionar productos</button>
                 </section>
 
                 <section class="shopping-list-panel" aria-labelledby="shoppingListTitle">
@@ -137,6 +140,19 @@
         </div>
     </div>
 
+    <!-- Modal para renombrar una receta desde la tarjeta -->
+    <div id="renameRecipeModal" class="modal">
+        <div class="modal-content category-picker-content">
+            <span class="close-btn" id="closeRenameRecipeModal">&times;</span>
+            <h2>✏️ Editar nombre de la receta</h2>
+            <div class="admin-form">
+                <label for="renameRecipeInput">Nuevo título</label>
+                <input type="text" id="renameRecipeInput">
+                <button id="saveRenameRecipeBtn" class="btn btn-primary">Guardar</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Modal de confirmación (genérico) -->
     <div id="confirmModal" class="modal">
         <div class="modal-content confirm-modal-content">
@@ -171,6 +187,22 @@
 
                 <button type="submit" class="btn btn-primary">Guardar Receta</button>
             </form>
+        </div>
+    </div>
+
+    <!-- Modal Gestión de Productos (catálogo de la lista de la compra) -->
+    <div id="productManagerModal" class="modal">
+        <div class="modal-content">
+            <span class="close-btn" id="closeProductManagerModal">&times;</span>
+            <h2>🛠️ Gestionar Productos</h2>
+            <div class="admin-form">
+                <label for="newProductName">Nuevo producto</label>
+                <div class="weekly-add-row">
+                    <input type="text" id="newProductName" placeholder="Ej.: Aguacates">
+                    <button id="addProductBtn" class="btn btn-primary">Añadir</button>
+                </div>
+            </div>
+            <ul id="productManagerList" class="category-manager-list"></ul>
         </div>
     </div>
 
