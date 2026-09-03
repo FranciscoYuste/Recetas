@@ -16,7 +16,8 @@ const DIAS = [
 ];
 const TIPOS_COMIDA = ['Comida', 'Cena'];
 
-let recipes = [];        // {id, title, url, ingredients, steps, categoria}
+let recipes = [];        // {id, title, url, categoria} de la página actual
+let favoriteRecipes = [];
 let categories = [];     // {id, categoria}
 let favorites = [];      // {id, receta_id}
 let products = [];       // {id, nombre}
@@ -34,6 +35,10 @@ let categoryIdPendingDelete = null;
 let semanaPendingDelete = null;
 let productIdPendingDelete = null;
 let currentlyViewedSemana = null;
+const RECIPES_PAGE_SIZE = 100;
+let currentRecipePage = 0;
+let totalRecipes = 0;
+let recipeSearchTimer = null;
 
 function resetPendingDeletes() {
     recipeIdPendingDelete = null;
@@ -47,8 +52,6 @@ function resetPendingDeletes() {
 document.addEventListener('DOMContentLoaded', async () => {
     try {
         await Promise.all([loadRecipes(), loadCategories(), loadFavorites(), loadProducts()]);
-        await loadShoppingList();
-        await loadCurrentWeekMenuDraft();
         renderCategoryFilters();
         renderFavoritesFilters();
         renderCategorySelects();
@@ -58,6 +61,10 @@ document.addEventListener('DOMContentLoaded', async () => {
         console.error('Error cargando datos iniciales:', e);
         showShoppingError(e);
     }
+
+    Promise.all([loadShoppingList(), loadCurrentWeekMenuDraft()]).catch(e => {
+        console.error('Error cargando datos secundarios:', e);
+    });
 
     setupSearchAndFilters();
     setupFavoritesModal();
@@ -97,40 +104,30 @@ async function supabaseRequest(table, query = '', options = {}) {
     return text ? JSON.parse(text) : null;
 }
 
-// Carga TODAS las filas de una tabla paginando con el header "Range", para que
-// ningún límite por defecto de PostgREST/Supabase (habitualmente 1000 filas)
-// nos deje resultados a medias.
-async function fetchAllRows(table, query = '') {
-    const pageSize = 1000;
-    let from = 0;
-    let all = [];
-    while (true) {
-        const response = await fetch(`${SUPABASE_URL}/rest/v1/${table}${query}`, {
-            headers: {
-                apikey: SUPABASE_KEY,
-                Authorization: 'Bearer ' + SUPABASE_KEY,
-                'Content-Type': 'application/json',
-                'Range-Unit': 'items',
-                Range: `${from}-${from + pageSize - 1}`
-            }
-        });
-        if (!response.ok && response.status !== 206) {
-            const text = await response.text();
-            throw new Error(`Supabase (${table}) respondió con ${response.status}: ${text}`);
-        }
-        const text = await response.text();
-        const rows = text ? JSON.parse(text) : [];
-        all = all.concat(rows);
-        if (rows.length < pageSize) break;
-        from += pageSize;
-    }
-    return all;
-}
-
 // -------------------- CARGA DE DATOS --------------------
 
 async function loadRecipes() {
-    recipes = await fetchAllRows('recetas', '?select=id,title,url,ingredients,steps,categoria&order=title.asc');
+    const search = document.getElementById('searchInput')?.value.trim() || '';
+    const params = new URLSearchParams({
+        select: 'id,title,url,categoria',
+        order: 'title.asc',
+        offset: String(currentRecipePage * RECIPES_PAGE_SIZE),
+        limit: String(RECIPES_PAGE_SIZE)
+    });
+    if (currentCategoryFilter !== 'Todas') params.set('categoria', `eq.${currentCategoryFilter}`);
+    if (search) params.set('title', `ilike.*${search}*`);
+
+    const response = await fetch(`${SUPABASE_URL}/rest/v1/recetas?${params}`, {
+        headers: {
+            apikey: SUPABASE_KEY,
+            Authorization: 'Bearer ' + SUPABASE_KEY,
+            Prefer: 'count=exact'
+        }
+    });
+    if (!response.ok) throw new Error(`Supabase (recetas) respondió con ${response.status}`);
+    recipes = await response.json();
+    const contentRange = response.headers.get('Content-Range');
+    totalRecipes = contentRange ? Number(contentRange.split('/')[1]) : recipes.length;
 }
 
 async function loadCategories() {
@@ -140,9 +137,15 @@ async function loadCategories() {
 async function loadFavorites() {
     try {
         favorites = await supabaseRequest('recetas_favoritas', '?select=id,receta_id');
+        const recipeIds = favorites.map(favorite => favorite.receta_id);
+        favoriteRecipes = recipeIds.length === 0 ? [] : await supabaseRequest(
+            'recetas',
+            `?select=id,title,url,categoria&id=in.(${recipeIds.join(',')})&order=title.asc`
+        );
     } catch (e) {
         console.error('Error cargando favoritos:', e);
         favorites = [];
+        favoriteRecipes = [];
     }
 }
 
@@ -194,10 +197,17 @@ function setupSearchAndFilters() {
         e.target.classList.add('active');
         const cat = e.target.dataset.cat;
         currentCategoryFilter = cat === 'Todas' ? 'Todas' : Number(cat);
-        renderRecipes();
+        currentRecipePage = 0;
+        loadRecipes().then(renderRecipes).catch(showRecipeError);
     });
 
-    document.getElementById('searchInput').addEventListener('input', renderRecipes);
+    document.getElementById('searchInput').addEventListener('input', () => {
+        clearTimeout(recipeSearchTimer);
+        recipeSearchTimer = setTimeout(() => {
+            currentRecipePage = 0;
+            loadRecipes().then(renderRecipes).catch(showRecipeError);
+        }, 250);
+    });
 
     const openAddRecipeBtn = document.getElementById('openAddRecipeBtn');
     if (openAddRecipeBtn) openAddRecipeBtn.onclick = () => {
@@ -209,17 +219,46 @@ function setupSearchAndFilters() {
 
 function renderRecipes() {
     const grid = document.getElementById('recipesGrid');
-    const query = document.getElementById('searchInput').value.toLowerCase();
-    const filtered = recipes.filter(r => {
-        const categoryMatch = currentCategoryFilter === 'Todas' || r.categoria === currentCategoryFilter;
-        const matchQuery = (r.title || '').toLowerCase().includes(query);
-        return categoryMatch && matchQuery;
-    });
-    if (filtered.length === 0) {
+    if (recipes.length === 0) {
         grid.innerHTML = '<div class="empty-state"><p>No hay recetas que coincidan.</p></div>';
+        renderRecipePagination();
         return;
     }
-    grid.innerHTML = filtered.map(recipeCardHtml).join('');
+    grid.innerHTML = recipes.map(recipeCardHtml).join('');
+    renderRecipePagination();
+}
+
+function renderRecipePagination() {
+    const pagination = document.getElementById('recipePagination');
+    if (!pagination) return;
+    const pageCount = Math.ceil(totalRecipes / RECIPES_PAGE_SIZE);
+    if (pageCount <= 1) {
+        pagination.innerHTML = '';
+        return;
+    }
+    pagination.innerHTML = `<button class="btn btn-secondary" ${currentRecipePage === 0 ? 'disabled' : ''} data-page="${currentRecipePage - 1}">Anterior</button>` +
+        `<span>Página ${currentRecipePage + 1} de ${pageCount}</span>` +
+        `<button class="btn btn-secondary" ${currentRecipePage >= pageCount - 1 ? 'disabled' : ''} data-page="${currentRecipePage + 1}">Siguiente</button>`;
+    pagination.querySelectorAll('button').forEach(button => {
+        button.onclick = async () => {
+            currentRecipePage = Number(button.dataset.page);
+            pagination.setAttribute('aria-busy', 'true');
+            try {
+                await loadRecipes();
+                renderRecipes();
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+            } catch (e) {
+                showRecipeError(e);
+            } finally {
+                pagination.removeAttribute('aria-busy');
+            }
+        };
+    });
+}
+
+function showRecipeError(error) {
+    console.error('Error cargando recetas:', error);
+    document.getElementById('recipesGrid').innerHTML = '<div class="empty-state"><p>No se pudieron cargar las recetas.</p></div>';
 }
 
 function recipeCardHtml(r) {
@@ -333,24 +372,33 @@ function setupRecipeModal() {
     };
 }
 
-function openModal(id) {
+async function openModal(id) {
     const r = recipes.find(item => item.id === id);
     if (!r) return;
+    let detail;
+    try {
+        detail = await supabaseRequest('recetas', `?id=eq.${id}&select=id,title,url,ingredients,steps,categoria`);
+    } catch (e) {
+        alert('No se pudo cargar la receta: ' + e.message);
+        return;
+    }
+    const recipe = detail && detail[0];
+    if (!recipe) return;
     const modal = document.getElementById('recipeModal');
     modal.dataset.recipeId = String(id);
-    document.getElementById('modalTitle').innerText = r.title;
-    document.getElementById('modalCategory').innerText = categoryName(r.categoria);
+    document.getElementById('modalTitle').innerText = recipe.title;
+    document.getElementById('modalCategory').innerText = categoryName(recipe.categoria);
 
-    const ingredientsList = (r.ingredients || '')
+    const ingredientsList = (recipe.ingredients || '')
         .split('\n')
         .map(i => i.trim())
         .filter(Boolean);
     document.getElementById('modalIngredients').innerHTML = ingredientsList.map(ing => '<li>' + ing + '</li>').join('');
 
-    document.getElementById('modalSteps').innerHTML = (r.steps || 'Sin pasos especificados.').replace(/\n/g, '<br>');
+    document.getElementById('modalSteps').innerHTML = (recipe.steps || 'Sin pasos especificados.').replace(/\n/g, '<br>');
 
     const urlWrapper = document.getElementById('modalUrlWrapper');
-    urlWrapper.innerHTML = r.url ? '<a href="' + r.url + '" target="_blank" rel="noopener">🌐 Ver receta original</a>' : '';
+    urlWrapper.innerHTML = recipe.url ? '<a href="' + recipe.url + '" target="_blank" rel="noopener">🌐 Ver receta original</a>' : '';
 
     modal.style.display = 'flex';
 }
@@ -799,7 +847,6 @@ function renderFavoritesGrid() {
     const activeBtn = document.querySelector('#favoritesFilters .active');
     const currentFavCategory = activeBtn ? activeBtn.dataset.cat : 'Todas';
 
-    const favoriteRecipes = recipes.filter(r => favorites.some(f => f.receta_id === r.id));
     const filtered = favoriteRecipes.filter(r => {
         const categoryMatch = currentFavCategory === 'Todas' || r.categoria === Number(currentFavCategory);
         const matchQuery = (r.title || '').toLowerCase().includes(query);

@@ -140,6 +140,19 @@ header {
     gap: 20px;
 }
 
+.recipe-pagination {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    margin: 28px 0 10px;
+}
+
+.recipe-pagination button:disabled {
+    cursor: not-allowed;
+    opacity: 0.45;
+}
+
 .card {
     display: flex;
     flex-direction: column;
