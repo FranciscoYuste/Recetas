@@ -134,6 +134,10 @@ header {
     width: 100%;
 }
 
+.main-layout {
+    padding-bottom: 105px;
+}
+
 .recipes-grid {
     display: grid;
     grid-template-columns: 1fr;
@@ -535,6 +539,10 @@ header {
 }
 
 @media (max-width: 700px) {
+    .main-layout {
+        padding-bottom: 125px;
+    }
+
     .back-to-top-btn {
         left: 12px;
         bottom: 12px;
