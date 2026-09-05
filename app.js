@@ -982,10 +982,11 @@ function setupProductManagerModal() {
         const input = document.getElementById('newProductName');
         const name = input.value.trim();
         if (!name) return;
+        const id = createProductId();
         try {
             await supabaseRequest('productos', '', {
                 method: 'POST',
-                body: JSON.stringify([{ nombre: name }])
+                body: JSON.stringify([{ id, nombre: name }])
             });
             input.value = '';
             await loadProducts();
@@ -1000,6 +1001,13 @@ function setupProductManagerModal() {
     });
 }
 
+function createProductId() {
+    const numericIds = products
+        .map(product => Number(product.id))
+        .filter(id => Number.isSafeInteger(id) && id > 0);
+    return numericIds.length > 0 ? Math.max(...numericIds) + 1 : 1;
+}
+
 function renderProductManagerList() {
     const list = document.getElementById('productManagerList');
     if (products.length === 0) {
@@ -1007,7 +1015,7 @@ function renderProductManagerList() {
         return;
     }
     list.innerHTML = products.map(p =>
-        `<li><span>${p.nombre}</span><button class="btn-clear" onclick="askDeleteProduct(${p.id})">Eliminar</button></li>`
+        `<li><span>${p.nombre}</span><button class="btn-clear" onclick="askDeleteProduct(${JSON.stringify(p.id)})">Eliminar</button></li>`
     ).join('');
 }
 
