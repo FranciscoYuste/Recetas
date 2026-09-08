@@ -637,6 +637,7 @@ header {
     max-height: 90vh;
     display: flex;
     flex-direction: column;
+    overflow: hidden;
 }
 
 .favorites-search-container {
@@ -653,16 +654,20 @@ header {
 
 .favorites-modal-content .recipes-grid {
     flex: 1;
+    min-height: 0;
     overflow-y: auto;
 }
 
 #favoritesFilters {
+    flex: 0 0 auto;
     flex-wrap: nowrap !important;
     overflow-x: auto;
     overflow-y: hidden;
     justify-content: flex-start !important;
     padding: 8px 4px !important;
     gap: 6px !important;
+    margin-bottom: 12px;
+    background: #121212;
 }
 
 #favoritesFilters button {

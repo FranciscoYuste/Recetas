@@ -172,6 +172,11 @@ function categoryName(id) {
     return c ? c.categoria : 'Sin categoría';
 }
 
+function getRecipeById(recipeId) {
+    return recipes.find(recipe => recipe.id === recipeId) ||
+        favoriteRecipes.find(recipe => recipe.id === recipeId);
+}
+
 function renderCategoryFilters() {
     const el = document.getElementById('categoryFilters');
     el.innerHTML = '<button class="active" data-cat="Todas">Todas</button>' +
@@ -275,7 +280,7 @@ function recipeCardHtml(r) {
 // -------------------- RENOMBRAR RECETA (desde la tarjeta) --------------------
 
 function openRenameRecipe(recipeId) {
-    const recipe = recipes.find(r => r.id === recipeId);
+    const recipe = getRecipeById(recipeId);
     if (!recipe) return;
     const modal = document.getElementById('renameRecipeModal');
     modal.dataset.recipeId = String(recipeId);
@@ -314,7 +319,7 @@ function setupRenameRecipeModal() {
 // -------------------- SELECTOR DE CATEGORÍA (desde la tarjeta) --------------------
 
 function openCategoryPicker(recipeId) {
-    const recipe = recipes.find(r => r.id === recipeId);
+    const recipe = getRecipeById(recipeId);
     if (!recipe) return;
     const modal = document.getElementById('categoryPickerModal');
     modal.dataset.recipeId = String(recipeId);
@@ -364,7 +369,7 @@ function setupRecipeModal() {
 
     document.getElementById('modalAddToWeeklyBtn').onclick = () => {
         const id = Number(document.getElementById('recipeModal').dataset.recipeId);
-        const recipe = recipes.find(r => r.id === id);
+        const recipe = getRecipeById(id);
         if (!recipe) return;
         const dia = Number(daySelect.value);
         const tipo = document.getElementById('modalWeeklyMealType').value;
@@ -373,7 +378,7 @@ function setupRecipeModal() {
 }
 
 async function openModal(id) {
-    const r = recipes.find(item => item.id === id);
+    const r = getRecipeById(id);
     if (!r) return;
     let detail;
     try {
@@ -439,7 +444,7 @@ function setupAddRecipeModal() {
 function askDeleteRecipe(id) {
     resetPendingDeletes();
     recipeIdPendingDelete = id;
-    const recipe = recipes.find(r => r.id === id);
+    const recipe = getRecipeById(id);
     document.getElementById('confirmMessage').innerText =
         `¿Seguro que quieres eliminar la receta "${recipe ? recipe.title : ''}" de tu base de datos? Esta acción no se puede deshacer.`;
     document.getElementById('confirmModal').style.display = 'flex';
