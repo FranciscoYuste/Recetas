@@ -1,6 +1,8 @@
-﻿// App.js - Recetario Digital 100% Supabase
-// Tablas usadas (ver diagrama): recetas, categoria_recetas, recetas_favoritas,
-// productos, lista_compra, semanas_guardadas
+﻿// App.js - Recetario Digital (Supabase vía PostgREST)
+// Tablas: recetas, categoria_recetas, recetas_favoritas, productos, lista_compra,
+// menu_semanal_actual (borrador de la semana), semanas_guardadas (historial).
+// Columnas opcionales (supabase/migracion_mejoras.sql): lista_compra.texto/comprado,
+// semanas_guardadas.creado_en, recetas.propia. Se detectan al arrancar.
 
 const SUPABASE_URL = 'https://vvhkuuuwpfbyqpthetos.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_KKUvsjeLk_gGNfOpdcg9aQ_4R0NTNyV';
@@ -15,78 +17,107 @@ const DIAS = [
     { id: 7, nombre: 'Domingo' }
 ];
 const TIPOS_COMIDA = ['Comida', 'Cena'];
+const VIEWS = ['semana', 'recetas', 'compra'];
+const RECIPES_PAGE_SIZE = 60;
+const LOCAL_CHECKED_KEY = 'recetario.comprados';
 
-let recipes = [];        // {id, title, url, categoria} de la página actual
-let favoriteRecipes = [];
-let categories = [];     // {id, categoria}
-let favorites = [];      // {id, receta_id}
-let products = [];       // {id, nombre}
-let shoppingList = [];   // {id, id_producto, cantidad, nombre}
+let schema = { shoppingExtras: false, menuFecha: false, propia: false };
 
-let currentCategoryFilter = 'Todas';
-let selectedProduct = null;
-
-// Menú semanal en edición (solo cliente, hasta que se guarda)
-let currentWeekMenu = {}; // key `${dia}_${tipo}` -> {receta_id, title}
-let savedMenusGrouped = {}; // semana -> [ {id, dia, tipo_comida, receta_id, title} ]
-
-let recipeIdPendingDelete = null;
-let categoryIdPendingDelete = null;
-let semanaPendingDelete = null;
-let productIdPendingDelete = null;
-let currentlyViewedSemana = null;
-const RECIPES_PAGE_SIZE = 100;
-let currentRecipePage = 0;
+let recipes = [];          // página actual del catálogo {id, title, url, categoria}
 let totalRecipes = 0;
+let allRecipesCount = null;
+let currentRecipePage = 0;
+let currentScope = 'todas'; // 'favoritas' | 'propias' | 'todas'
+let currentCategoryFilter = 'Todas';
 let recipeSearchTimer = null;
+let recipeLoadToken = 0;
 
-function resetPendingDeletes() {
-    recipeIdPendingDelete = null;
-    categoryIdPendingDelete = null;
-    semanaPendingDelete = null;
-    productIdPendingDelete = null;
-}
+let categories = [];       // {id, categoria}
+let favorites = [];        // {id, receta_id}
+let favoriteRecipes = [];  // {id, title, url, categoria, ingredients}
+let products = [];         // {id, nombre}
+let shoppingList = [];     // {id, id_producto, cantidad, nombre, comprado}
 
-// -------------------- ARRANQUE --------------------
+let currentWeekMenu = {};  // `${dia}_${tipo}` -> {receta_id, title, draftId}
+let savedMenusGrouped = {};
+let currentlyViewedSemana = null;
+
+let currentRecipe = null;  // receta abierta en el modal
+let randomMode = false;
+let pickerSlot = null;     // {dia, tipo}
+let pickerSearchTimer = null;
+let pickerSearchToken = 0;
+let confirmAction = null;
+let deferredInstallPrompt = null;
+let toastTimer = null;
+
+const $ = (id) => document.getElementById(id);
 
 if ('serviceWorker' in navigator && location.protocol !== 'file:') {
     navigator.serviceWorker.register('./sw.js').catch(e => console.warn('Service worker no registrado:', e));
 }
 
-document.addEventListener('DOMContentLoaded', async () => {
-    try {
-        await Promise.all([loadRecipes(), loadCategories(), loadFavorites(), loadProducts()]);
-        renderCategoryFilters();
-        renderFavoritesFilters();
-        renderCategorySelects();
-        renderRecipes();
-        updateFavoritesCount();
-    } catch (e) {
-        console.error('Error cargando datos iniciales:', e);
-        showShoppingError(e);
-    }
-
-    Promise.all([loadShoppingList(), loadCurrentWeekMenuDraft()]).catch(e => {
-        console.error('Error cargando datos secundarios:', e);
-    });
-
-    setupSearchAndFilters();
-    setupFavoritesModal();
-    setupShoppingModal();
-    setupProductManagerModal();
-    setupRecipeModal();
-    setupCategoryPickerModal();
-    setupRenameRecipeModal();
-    setupConfirmModal();
-    setupAddRecipeModal();
-    setupCategoryManagerModal();
-    setupWeeklyMenuModal();
-    setupSavedMenusModal();
-    setupBackToTop();
-    setupGlobalModalClose();
+window.addEventListener('beforeinstallprompt', (e) => {
+    e.preventDefault();
+    deferredInstallPrompt = e;
+    const btn = $('installAppBtn');
+    if (btn) btn.hidden = false;
 });
 
-// -------------------- SUPABASE HELPER --------------------
+// -------------------- ARRANQUE --------------------
+
+document.addEventListener('DOMContentLoaded', async () => {
+    setupNavigation();
+    setupGlobalHandlers();
+    setupWeekView();
+    setupRecipesView();
+    setupShoppingView();
+    setupRecipeModal();
+    setupPickerModal();
+    setupSettingsModal();
+    setupAddRecipeModal();
+    setupCategoryManagerModal();
+    setupProductManagerModal();
+    setupConfirmModal();
+    setupBackToTop();
+
+    $('weeklyGrid').innerHTML = '<p class="hint">Cargando…</p>';
+    try {
+        await detectSchema();
+        await Promise.all([loadCategories(), loadFavorites(), loadProducts()]);
+    } catch (e) {
+        console.error('Error cargando datos iniciales:', e);
+        showToast('No se pudieron cargar los datos. Revisa la conexión.', true);
+    }
+
+    currentScope = favorites.length > 0 ? 'favoritas' : 'todas';
+    renderCategoryFilters();
+    renderScopeFilters();
+    renderCategorySelects();
+    refreshRecipes();
+
+    await Promise.all([
+        loadCurrentWeekMenuDraft().then(renderWeek),
+        loadShoppingList().catch(showShoppingError)
+    ]);
+});
+
+async function detectSchema() {
+    const probe = (table, cols) => supabaseRequest(table, `?select=${cols}&limit=1`).then(() => true, () => false);
+    const [shoppingExtras, menuFecha, propia] = await Promise.all([
+        probe('lista_compra', 'texto,comprado'),
+        probe('semanas_guardadas', 'creado_en'),
+        probe('recetas', 'propia')
+    ]);
+    schema = { shoppingExtras, menuFecha, propia };
+    const hint = $('schemaHint');
+    if (hint && !(shoppingExtras && menuFecha && propia)) {
+        hint.hidden = false;
+        hint.textContent = 'ℹ️ Para tachar productos sincronizados entre móviles, ver fechas en los menús y el filtro «Mis recetas», ejecuta supabase/migracion_mejoras.sql en Supabase.';
+    }
+}
+
+// -------------------- SUPABASE --------------------
 
 async function supabaseRequest(table, query = '', options = {}) {
     const response = await fetch(`${SUPABASE_URL}/rest/v1/${table}${query}`, {
@@ -108,43 +139,220 @@ async function supabaseRequest(table, query = '', options = {}) {
     return text ? JSON.parse(text) : null;
 }
 
-// -------------------- CARGA DE DATOS --------------------
-
-async function loadRecipes() {
-    const search = document.getElementById('searchInput')?.value.trim() || '';
-    const params = new URLSearchParams({
-        select: 'id,title,url,categoria',
-        order: 'title.asc',
-        offset: String(currentRecipePage * RECIPES_PAGE_SIZE),
-        limit: String(RECIPES_PAGE_SIZE)
+// Devuelve filas + total (cabecera Content-Range) para paginar.
+async function supabaseCount(table, params) {
+    const response = await fetch(`${SUPABASE_URL}/rest/v1/${table}?${params}`, {
+        headers: { apikey: SUPABASE_KEY, Authorization: 'Bearer ' + SUPABASE_KEY, Prefer: 'count=exact' }
     });
-    if (currentCategoryFilter !== 'Todas') params.set('categoria', `eq.${currentCategoryFilter}`);
-    if (search) params.set('title', `ilike.*${search}*`);
-
-    const response = await fetch(`${SUPABASE_URL}/rest/v1/recetas?${params}`, {
-        headers: {
-            apikey: SUPABASE_KEY,
-            Authorization: 'Bearer ' + SUPABASE_KEY,
-            Prefer: 'count=exact'
-        }
-    });
-    if (!response.ok) throw new Error(`Supabase (recetas) respondió con ${response.status}`);
-    recipes = await response.json();
-    const contentRange = response.headers.get('Content-Range');
-    totalRecipes = contentRange ? Number(contentRange.split('/')[1]) : recipes.length;
+    if (!response.ok) throw new Error(`Supabase (${table}) respondió con ${response.status}`);
+    const rows = await response.json();
+    const range = response.headers.get('Content-Range');
+    return { rows, total: range ? Number(range.split('/')[1]) : rows.length };
 }
 
+// -------------------- UTILIDADES --------------------
+
+function escapeHtml(value) {
+    return String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+function normalizeText(text) {
+    return String(text ?? '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+}
+
+// "calabacin atun" -> "calabac[ií]n.*[aá]t[uúü]n" para buscar sin importar tildes (imatch de PostgREST).
+function accentInsensitivePattern(text) {
+    const map = { a: '[aáà]', e: '[eéè]', i: '[iíï]', o: '[oó]', u: '[uúü]', n: '[nñ]' };
+    return normalizeText(text)
+        .replace(/[^a-z0-9 ]/g, ' ')
+        .trim()
+        .split(/\s+/)
+        .filter(Boolean)
+        .map(word => word.split('').map(ch => map[ch] || ch).join(''))
+        .join('.*');
+}
+
+function matchesSearch(text, query) {
+    const pattern = accentInsensitivePattern(query);
+    if (!pattern) return true;
+    return new RegExp(pattern, 'i').test(String(text ?? ''));
+}
+
+function categoryName(id) {
+    const c = categories.find(cat => cat.id === id);
+    return c ? c.categoria : 'Sin categoría';
+}
+
+function todayDiaId() {
+    const d = new Date().getDay();
+    return d === 0 ? 7 : d;
+}
+
+function diaNombre(id) {
+    const d = DIAS.find(x => x.id === Number(id));
+    return d ? d.nombre : '';
+}
+
+function openModalEl(id) {
+    $(id).style.display = 'flex';
+}
+
+function closeModalEl(id) {
+    $(id).style.display = 'none';
+}
+
+function showToast(message, isError = false) {
+    const toast = $('toast');
+    toast.textContent = message;
+    toast.classList.toggle('toast-error', isError);
+    toast.hidden = false;
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => { toast.hidden = true; }, isError ? 5000 : 2600);
+}
+
+function askConfirm(message, yesLabel, onYes, { danger = true, noLabel = 'Cancelar' } = {}) {
+    confirmAction = onYes;
+    $('confirmMessage').innerText = message;
+    $('confirmNoBtn').textContent = noLabel;
+    const yes = $('confirmYesBtn');
+    yes.textContent = yesLabel;
+    yes.className = danger ? 'btn-clear' : 'btn btn-primary';
+    openModalEl('confirmModal');
+}
+
+// Los ingredientes importados vienen pegados ("camaronesMantecaSal2 cdas."). Se separan
+// por saltos de línea, comas sueltas, minúscula+Mayúscula y antes de "200 gramos de...".
+function parseIngredients(raw) {
+    const units = 'unidad(?:es)?|tazas?|cucharadas?(?: soperas?)?|cucharaditas?|cdas?\\.?|cditas?\\.?|manojos?|gr\\.?|gramos?|g|kg|ml|cl|l|litros?|pizcas?|dientes?|latas?|vasos?|chorritos?|chorros?|ramitas?|ramas?|hojas?|rebanadas?|lonchas?|piezas?|sobres?|paquetes?|botes?|tarros?|cubitos?|pastillas?|filetes?|rodajas?|puñados?|copas?|onzas?|lb';
+    const beforeQuantity = new RegExp(`(?<!\\d)\\s(?=(?:\\d+(?:\\s+\\d+/\\d+|[.,/]\\d+)?|½|¼|¾)\\s*(?:${units})\\b)`, 'gi');
+    const seen = new Set();
+    return String(raw ?? '')
+        .replace(/^\s*ingredientes:?\s*/i, '')
+        .split(/\n+|\s+,\s*/)
+        .flatMap(part => part
+            .replace(/([a-záéíóúüñ.)])(?=[A-ZÁÉÍÓÚÑ0-9½¼¾])/g, '$1\n')
+            .replace(beforeQuantity, '\n')
+            .split('\n'))
+        .map(s => s.trim().replace(/^[-•*]\s*/, '').replace(/[,;]$/, '').trim())
+        .filter(s => s.length > 1 && !/^ingredientes:?$/i.test(s))
+        .filter(s => {
+            const key = normalizeText(s);
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+        });
+}
+
+function formatSteps(steps, title) {
+    let s = String(steps ?? '').trim();
+    if (title && s.toLowerCase().startsWith(String(title).toLowerCase())) s = s.slice(title.length).trim();
+    s = s.replace(/^preparaci[oó]n:?\s*/i, '');
+    if (!s) return '<p>Sin pasos especificados.</p>';
+    let parts = s.split(/\n+/);
+    if (parts.length === 1) parts = s.split(/\s(?=\d{1,2}\s+[A-ZÁÉÍÓÚÑ¡¿])/);
+    return parts.map(p => p.trim()).filter(Boolean).map(p => `<p>${escapeHtml(p)}</p>`).join('');
+}
+
+function ingredientChecklistHtml(items) {
+    if (items.length === 0) return '<p class="hint">Sin ingredientes.</p>';
+    return '<ul class="ingredient-checklist">' + items.map(i =>
+        `<li><label><input type="checkbox" value="${escapeHtml(i)}"><span>${escapeHtml(i)}</span></label></li>`
+    ).join('') + '</ul>';
+}
+
+// -------------------- NAVEGACIÓN --------------------
+
+function setupNavigation() {
+    document.querySelectorAll('.tab').forEach(tab => {
+        tab.addEventListener('click', () => {
+            const view = tab.dataset.view;
+            if (location.hash === '#' + view) showView(view);
+            else location.hash = view;
+        });
+    });
+    window.addEventListener('hashchange', () => showView(currentViewFromHash()));
+    showView(currentViewFromHash());
+}
+
+function currentViewFromHash() {
+    const name = location.hash.replace('#', '');
+    return VIEWS.includes(name) ? name : 'semana';
+}
+
+function showView(name) {
+    VIEWS.forEach(v => { $('view-' + v).hidden = v !== name; });
+    document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.view === name));
+    window.scrollTo({ top: 0 });
+}
+
+function goToView(name) {
+    location.hash = name;
+}
+
+// Clicks de elementos generados dinámicamente: <... data-action="x" data-id="..">
+const ACTIONS = {
+    'open-recipe': (el) => { randomMode = false; openRecipe(Number(el.dataset.id)); },
+    'toggle-fav': (el) => toggleFavorite(Number(el.dataset.id)),
+    'set-scope': (el) => setScope(el.dataset.scope),
+    'filter-cat': (el) => setCategoryFilter(el.dataset.cat),
+    'page': (el) => goToRecipePage(Number(el.dataset.page)),
+    'slot-pick': (el) => openRecipePicker(Number(el.dataset.dia), el.dataset.tipo),
+    'slot-remove': (el) => removeFromWeeklyMenu(el.dataset.key),
+    'pick-recipe': (el) => pickRecipeForSlot({ id: Number(el.dataset.id), title: el.dataset.title }),
+    'shop-toggle': (el) => toggleShoppingItem(Number(el.dataset.id)),
+    'shop-inc': (el) => changeShoppingQuantity(Number(el.dataset.id), 1),
+    'shop-dec': (el) => changeShoppingQuantity(Number(el.dataset.id), -1),
+    'shop-remove': (el) => removeShoppingItem(Number(el.dataset.id)),
+    'add-suggestion': (el) => addProductById(el.dataset.id),
+    'saved-toggle': (el) => toggleSavedMenu(el.dataset.semana),
+    'saved-repeat': (el) => repeatSavedMenu(el.dataset.semana),
+    'saved-delete': (el) => askDeleteSavedMenu(el.dataset.semana),
+    'cat-delete': (el) => askDeleteCategory(Number(el.dataset.id)),
+    'product-delete': (el) => askDeleteProduct(el.dataset.id),
+    'go-view': (el) => goToView(el.dataset.view)
+};
+
+function setupGlobalHandlers() {
+    document.addEventListener('click', (e) => {
+        const closer = e.target.closest('[data-close]');
+        if (closer) {
+            closeModalEl(closer.dataset.close);
+            return;
+        }
+        if (e.target.classList.contains('modal')) {
+            if (e.target.id !== 'confirmModal') closeModalEl(e.target.id);
+            return;
+        }
+        const el = e.target.closest('[data-action]');
+        if (el && ACTIONS[el.dataset.action]) {
+            if (el.tagName !== 'INPUT') e.preventDefault();
+            Promise.resolve(ACTIONS[el.dataset.action](el)).catch(err => {
+                console.error(err);
+                showToast('Algo ha fallado: ' + err.message, true);
+            });
+        }
+    });
+
+    document.addEventListener('keydown', (e) => {
+        if (e.key !== 'Escape') return;
+        const open = [...document.querySelectorAll('.modal')].filter(m => m.style.display === 'flex');
+        const top = open.find(m => m.id === 'confirmModal') || open[open.length - 1];
+        if (top) closeModalEl(top.id);
+    });
+}
+
+// -------------------- DATOS --------------------
+
 async function loadCategories() {
-    categories = await supabaseRequest('categoria_recetas', '?select=id,categoria&order=categoria.asc');
+    categories = await supabaseRequest('categoria_recetas', '?select=id,categoria&order=categoria.asc') || [];
 }
 
 async function loadFavorites() {
     try {
-        favorites = await supabaseRequest('recetas_favoritas', '?select=id,receta_id');
-        const recipeIds = favorites.map(favorite => favorite.receta_id);
-        favoriteRecipes = recipeIds.length === 0 ? [] : await supabaseRequest(
-            'recetas',
-            `?select=id,title,url,categoria&id=in.(${recipeIds.join(',')})&order=title.asc`
+        favorites = await supabaseRequest('recetas_favoritas', '?select=id,receta_id') || [];
+        const ids = [...new Set(favorites.map(f => f.receta_id))];
+        favoriteRecipes = ids.length === 0 ? [] : await supabaseRequest(
+            'recetas', `?select=id,title,url,categoria,ingredients&id=in.(${ids.join(',')})&order=title.asc`
         );
     } catch (e) {
         console.error('Error cargando favoritos:', e);
@@ -154,422 +362,25 @@ async function loadFavorites() {
 }
 
 async function loadProducts() {
-    products = await supabaseRequest('productos', '?select=id,nombre&order=nombre.asc');
+    products = await supabaseRequest('productos', '?select=id,nombre&order=nombre.asc') || [];
 }
 
-async function loadShoppingList() {
-    const data = await supabaseRequest('lista_compra', '?select=id,id_producto,cantidad,productos(nombre)&order=id.asc');
-    shoppingList = (data || []).map(item => ({
-        id: item.id,
-        id_producto: item.id_producto,
-        cantidad: Number.isInteger(item.cantidad) && item.cantidad > 0 ? item.cantidad : 1,
-        nombre: item.productos ? item.productos.nombre : 'Producto'
-    }));
-    renderShoppingList();
-    setShoppingStatus('Lista actualizada');
-}
+// -------------------- SEMANA --------------------
 
-// -------------------- CATEGORÍAS (filtros y selects) --------------------
-
-function categoryName(id) {
-    const c = categories.find(cat => cat.id === id);
-    return c ? c.categoria : 'Sin categoría';
-}
-
-function getRecipeById(recipeId) {
-    return recipes.find(recipe => recipe.id === recipeId) ||
-        favoriteRecipes.find(recipe => recipe.id === recipeId);
-}
-
-function renderCategoryFilters() {
-    const el = document.getElementById('categoryFilters');
-    el.innerHTML = '<button class="active" data-cat="Todas">Todas</button>' +
-        categories.map(c => `<button data-cat="${c.id}">${c.categoria}</button>`).join('');
-}
-
-function renderFavoritesFilters() {
-    const el = document.getElementById('favoritesFilters');
-    el.innerHTML = '<button class="active" data-cat="Todas">Todas</button>' +
-        categories.map(c => `<button data-cat="${c.id}">${c.categoria}</button>`).join('');
-}
-
-function renderCategorySelects() {
-    const options = categories.map(c => `<option value="${c.id}">${c.categoria}</option>`).join('');
-    const newRecipeSelect = document.getElementById('newRecipeCategory');
-    if (newRecipeSelect) newRecipeSelect.innerHTML = options;
-}
-
-function setupSearchAndFilters() {
-    document.getElementById('categoryFilters').addEventListener('click', (e) => {
-        if (e.target.tagName !== 'BUTTON') return;
-        document.querySelectorAll('#categoryFilters button').forEach(b => b.classList.remove('active'));
-        e.target.classList.add('active');
-        const cat = e.target.dataset.cat;
-        currentCategoryFilter = cat === 'Todas' ? 'Todas' : Number(cat);
-        currentRecipePage = 0;
-        loadRecipes().then(renderRecipes).catch(showRecipeError);
-    });
-
-    document.getElementById('searchInput').addEventListener('input', () => {
-        clearTimeout(recipeSearchTimer);
-        recipeSearchTimer = setTimeout(() => {
-            currentRecipePage = 0;
-            loadRecipes().then(renderRecipes).catch(showRecipeError);
-        }, 250);
-    });
-
-    const openAddRecipeBtn = document.getElementById('openAddRecipeBtn');
-    if (openAddRecipeBtn) openAddRecipeBtn.onclick = () => {
-        document.getElementById('addRecipeModal').style.display = 'flex';
+function setupWeekView() {
+    $('weekIngredientsBtn').onclick = () => openWeekIngredients().catch(e => showToast(e.message, true));
+    $('saveWeeklyMenuBtn').onclick = () => saveWeeklyMenu();
+    $('openSavedMenusBtn').onclick = () => openSavedMenus();
+    $('clearWeeklyMenuBtn').onclick = () => {
+        if (Object.keys(currentWeekMenu).length === 0) return showToast('La semana ya está vacía');
+        askConfirm('¿Vaciar el menú de esta semana?', 'Sí, vaciar', clearWeekMenu);
     };
+    $('weekIngredientsAddBtn').onclick = () => addCheckedIngredients('ingredientsModalBody');
 }
-
-// -------------------- RECETAS: LISTADO Y MODAL --------------------
-
-function renderRecipes() {
-    const grid = document.getElementById('recipesGrid');
-    if (recipes.length === 0) {
-        grid.innerHTML = '<div class="empty-state"><p>No hay recetas que coincidan.</p></div>';
-        renderRecipePagination();
-        return;
-    }
-    grid.innerHTML = recipes.map(recipeCardHtml).join('');
-    renderRecipePagination();
-}
-
-function renderRecipePagination() {
-    const pagination = document.getElementById('recipePagination');
-    if (!pagination) return;
-    const pageCount = Math.ceil(totalRecipes / RECIPES_PAGE_SIZE);
-    if (pageCount <= 1) {
-        pagination.innerHTML = '';
-        return;
-    }
-    pagination.innerHTML = `<button class="btn btn-secondary" ${currentRecipePage === 0 ? 'disabled' : ''} data-page="${currentRecipePage - 1}">Anterior</button>` +
-        `<span>Página ${currentRecipePage + 1} de ${pageCount}</span>` +
-        `<button class="btn btn-secondary" ${currentRecipePage >= pageCount - 1 ? 'disabled' : ''} data-page="${currentRecipePage + 1}">Siguiente</button>`;
-    pagination.querySelectorAll('button').forEach(button => {
-        button.onclick = async () => {
-            currentRecipePage = Number(button.dataset.page);
-            pagination.setAttribute('aria-busy', 'true');
-            try {
-                await loadRecipes();
-                renderRecipes();
-                window.scrollTo({ top: 0, behavior: 'smooth' });
-            } catch (e) {
-                showRecipeError(e);
-            } finally {
-                pagination.removeAttribute('aria-busy');
-            }
-        };
-    });
-}
-
-function showRecipeError(error) {
-    console.error('Error cargando recetas:', error);
-    document.getElementById('recipesGrid').innerHTML = '<div class="empty-state"><p>No se pudieron cargar las recetas.</p></div>';
-}
-
-function recipeCardHtml(r) {
-    return '<div class="card"><div><button class="badge badge-btn" title="Cambiar categoría" onclick="openCategoryPicker(' + r.id + ')">' +
-        categoryName(r.categoria) + ' ✎</button><h3>' + r.title +
-        ' <button class="edit-title-btn" title="Editar nombre" onclick="openRenameRecipe(' + r.id + ')">✏️</button></h3></div><div class="card-actions">' +
-        '<button class="favorite-btn ' + (isFavorite(r.id) ? 'active' : '') + '" title="' +
-        (isFavorite(r.id) ? 'Quitar de favoritos' : 'Agregar a favoritos') +
-        '" onclick="toggleFavorite(' + r.id + ')">' + (isFavorite(r.id) ? '⭐' : '☆') + '</button>' +
-        '<button class="btn btn-primary" onclick="openModal(' + r.id + ')">📖 Ver Receta</button>' +
-        '<button class="delete-recipe-btn" title="Eliminar receta" onclick="askDeleteRecipe(' + r.id + ')">🗑️</button></div></div>';
-}
-
-// -------------------- RENOMBRAR RECETA (desde la tarjeta) --------------------
-
-function openRenameRecipe(recipeId) {
-    const recipe = getRecipeById(recipeId);
-    if (!recipe) return;
-    const modal = document.getElementById('renameRecipeModal');
-    modal.dataset.recipeId = String(recipeId);
-    document.getElementById('renameRecipeInput').value = recipe.title;
-    modal.style.display = 'flex';
-    document.getElementById('renameRecipeInput').focus();
-}
-
-function setupRenameRecipeModal() {
-    document.getElementById('closeRenameRecipeModal').onclick = () => {
-        document.getElementById('renameRecipeModal').style.display = 'none';
-    };
-    document.getElementById('saveRenameRecipeBtn').onclick = async () => {
-        const modal = document.getElementById('renameRecipeModal');
-        const id = Number(modal.dataset.recipeId);
-        const newTitle = document.getElementById('renameRecipeInput').value.trim();
-        if (!newTitle) return;
-        try {
-            await supabaseRequest('recetas', `?id=eq.${id}`, {
-                method: 'PATCH',
-                body: JSON.stringify({ title: newTitle })
-            });
-            await loadRecipes();
-            renderRecipes();
-            renderFavoritesGrid();
-            modal.style.display = 'none';
-        } catch (e) {
-            alert('No se pudo actualizar el nombre: ' + e.message);
-        }
-    };
-    document.getElementById('renameRecipeInput').addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') document.getElementById('saveRenameRecipeBtn').click();
-    });
-}
-
-// -------------------- SELECTOR DE CATEGORÍA (desde la tarjeta) --------------------
-
-function openCategoryPicker(recipeId) {
-    const recipe = getRecipeById(recipeId);
-    if (!recipe) return;
-    const modal = document.getElementById('categoryPickerModal');
-    modal.dataset.recipeId = String(recipeId);
-    document.getElementById('categoryPickerRecipeTitle').innerText = recipe.title;
-
-    const list = document.getElementById('categoryPickerList');
-    const noneBtn = `<button class="category-picker-option ${recipe.categoria == null ? 'active' : ''}" data-cat="">Sin categoría</button>`;
-    const catButtons = categories.map(c =>
-        `<button class="category-picker-option ${recipe.categoria === c.id ? 'active' : ''}" data-cat="${c.id}">${c.categoria}</button>`
-    ).join('');
-    list.innerHTML = noneBtn + catButtons;
-    list.querySelectorAll('.category-picker-option').forEach(btn => {
-        btn.onclick = () => assignCategoryToRecipe(recipeId, btn.dataset.cat ? Number(btn.dataset.cat) : null);
-    });
-
-    modal.style.display = 'flex';
-}
-
-async function assignCategoryToRecipe(recipeId, categoryId) {
-    try {
-        await supabaseRequest('recetas', `?id=eq.${recipeId}`, {
-            method: 'PATCH',
-            body: JSON.stringify({ categoria: categoryId })
-        });
-        await loadRecipes();
-        renderRecipes();
-        renderFavoritesGrid();
-        document.getElementById('categoryPickerModal').style.display = 'none';
-    } catch (e) {
-        alert('No se pudo actualizar la categoría: ' + e.message);
-    }
-}
-
-function setupCategoryPickerModal() {
-    document.getElementById('closeCategoryPickerModal').onclick = () => {
-        document.getElementById('categoryPickerModal').style.display = 'none';
-    };
-}
-
-function setupRecipeModal() {
-    document.getElementById('closeModal').onclick = () => {
-        document.getElementById('recipeModal').style.display = 'none';
-    };
-
-    const daySelect = document.getElementById('modalWeeklyDay');
-    daySelect.innerHTML = DIAS.map(d => `<option value="${d.id}">${d.nombre}</option>`).join('');
-
-    document.getElementById('modalAddToWeeklyBtn').onclick = () => {
-        const id = Number(document.getElementById('recipeModal').dataset.recipeId);
-        const recipe = getRecipeById(id);
-        if (!recipe) return;
-        const dia = Number(daySelect.value);
-        const tipo = document.getElementById('modalWeeklyMealType').value;
-        addToCurrentWeekMenu(dia, tipo, recipe).catch(e => alert('No se pudo añadir a la semana: ' + e.message));
-    };
-}
-
-async function openModal(id) {
-    const r = getRecipeById(id);
-    if (!r) return;
-    let detail;
-    try {
-        detail = await supabaseRequest('recetas', `?id=eq.${id}&select=id,title,url,ingredients,steps,categoria`);
-    } catch (e) {
-        alert('No se pudo cargar la receta: ' + e.message);
-        return;
-    }
-    const recipe = detail && detail[0];
-    if (!recipe) return;
-    const modal = document.getElementById('recipeModal');
-    modal.dataset.recipeId = String(id);
-    document.getElementById('modalTitle').innerText = recipe.title;
-    document.getElementById('modalCategory').innerText = categoryName(recipe.categoria);
-
-    const ingredientsList = (recipe.ingredients || '')
-        .split('\n')
-        .map(i => i.trim())
-        .filter(Boolean);
-    document.getElementById('modalIngredients').innerHTML = ingredientsList.map(ing => '<li>' + ing + '</li>').join('');
-
-    document.getElementById('modalSteps').innerHTML = (recipe.steps || 'Sin pasos especificados.').replace(/\n/g, '<br>');
-
-    const urlWrapper = document.getElementById('modalUrlWrapper');
-    urlWrapper.innerHTML = recipe.url ? '<a href="' + recipe.url + '" target="_blank" rel="noopener">🌐 Ver receta original</a>' : '';
-
-    modal.style.display = 'flex';
-}
-
-// -------------------- AÑADIR RECETA --------------------
-
-function setupAddRecipeModal() {
-    document.getElementById('closeAddRecipeModal').onclick = () => {
-        document.getElementById('addRecipeModal').style.display = 'none';
-    };
-    document.getElementById('addRecipeForm').addEventListener('submit', async (e) => {
-        e.preventDefault();
-        const title = document.getElementById('newRecipeTitle').value.trim();
-        const url = document.getElementById('newRecipeUrl').value.trim();
-        const ingredients = document.getElementById('newRecipeIngredients').value.trim();
-        const steps = document.getElementById('newRecipeSteps').value.trim();
-        const categorySelect = document.getElementById('newRecipeCategory');
-        const categoria = categorySelect.value ? Number(categorySelect.value) : null;
-        if (!title || !ingredients || !steps) return;
-
-        try {
-            await supabaseRequest('recetas', '', {
-                method: 'POST',
-                body: JSON.stringify([{ title, url: url || null, ingredients, steps, categoria }])
-            });
-            await loadRecipes();
-            renderRecipes();
-            e.target.reset();
-            document.getElementById('addRecipeModal').style.display = 'none';
-        } catch (err) {
-            alert('No se pudo guardar la receta: ' + err.message);
-        }
-    });
-}
-
-// -------------------- ELIMINAR RECETA (con confirmación) --------------------
-
-function askDeleteRecipe(id) {
-    resetPendingDeletes();
-    recipeIdPendingDelete = id;
-    const recipe = getRecipeById(id);
-    document.getElementById('confirmMessage').innerText =
-        `¿Seguro que quieres eliminar la receta "${recipe ? recipe.title : ''}" de tu base de datos? Esta acción no se puede deshacer.`;
-    document.getElementById('confirmModal').style.display = 'flex';
-}
-
-function setupConfirmModal() {
-    document.getElementById('confirmNoBtn').onclick = closeConfirmModal;
-    document.getElementById('confirmYesBtn').onclick = async () => {
-        try {
-            if (recipeIdPendingDelete != null) {
-                const id = recipeIdPendingDelete;
-                await supabaseRequest('recetas_favoritas', `?receta_id=eq.${id}`, { method: 'DELETE' });
-                await supabaseRequest('semanas_guardadas', `?receta_id=eq.${id}`, { method: 'DELETE' });
-                await supabaseRequest('recetas', `?id=eq.${id}`, { method: 'DELETE' });
-                await Promise.all([loadRecipes(), loadFavorites()]);
-                renderRecipes();
-                updateFavoritesCount();
-                document.getElementById('recipeModal').style.display = 'none';
-            } else if (categoryIdPendingDelete != null) {
-                const id = categoryIdPendingDelete;
-                await supabaseRequest('recetas', `?categoria=eq.${id}`, {
-                    method: 'PATCH',
-                    body: JSON.stringify({ categoria: null })
-                });
-                await supabaseRequest('categoria_recetas', `?id=eq.${id}`, { method: 'DELETE' });
-                await Promise.all([loadCategories(), loadRecipes()]);
-                renderCategoryFilters();
-                renderFavoritesFilters();
-                renderCategorySelects();
-                renderRecipes();
-                renderCategoryManagerList();
-            } else if (semanaPendingDelete != null) {
-                const semana = semanaPendingDelete;
-                await supabaseRequest('semanas_guardadas', `?semana=eq.${semana}`, { method: 'DELETE' });
-                await loadSavedMenus();
-                currentlyViewedSemana = null;
-                renderSavedMenusList();
-                document.getElementById('savedMenuDetail').innerHTML = '';
-                document.getElementById('savedMenuDetailTitle').innerHTML = '';
-            } else if (productIdPendingDelete != null) {
-                const id = productIdPendingDelete;
-                await supabaseRequest('lista_compra', `?id_producto=eq.${id}`, { method: 'DELETE' });
-                await supabaseRequest('productos', `?id=eq.${id}`, { method: 'DELETE' });
-                await Promise.all([loadProducts(), loadShoppingList()]);
-                renderProductResults();
-                renderProductManagerList();
-            }
-        } catch (e) {
-            alert('No se pudo completar la eliminación: ' + e.message);
-        } finally {
-            closeConfirmModal();
-        }
-    };
-}
-
-function closeConfirmModal() {
-    resetPendingDeletes();
-    document.getElementById('confirmModal').style.display = 'none';
-}
-
-// -------------------- GESTIÓN DE CATEGORÍAS --------------------
-
-function setupCategoryManagerModal() {
-    document.getElementById('openCategoryManagerBtn').onclick = () => {
-        renderCategoryManagerList();
-        document.getElementById('categoryManagerModal').style.display = 'flex';
-    };
-    document.getElementById('closeCategoryManagerModal').onclick = () => {
-        document.getElementById('categoryManagerModal').style.display = 'none';
-    };
-    document.getElementById('addCategoryBtn').onclick = async () => {
-        const input = document.getElementById('newCategoryName');
-        const name = input.value.trim();
-        if (!name) return;
-        try {
-            await supabaseRequest('categoria_recetas', '', {
-                method: 'POST',
-                body: JSON.stringify([{ categoria: name }])
-            });
-            input.value = '';
-            await loadCategories();
-            renderCategoryFilters();
-            renderFavoritesFilters();
-            renderCategorySelects();
-            renderCategoryManagerList();
-        } catch (e) {
-            alert('No se pudo añadir la categoría: ' + e.message);
-        }
-    };
-}
-
-function renderCategoryManagerList() {
-    const list = document.getElementById('categoryManagerList');
-    if (categories.length === 0) {
-        list.innerHTML = '<li>No hay categorías todavía.</li>';
-        return;
-    }
-    list.innerHTML = categories.map(c =>
-        `<li><span>${c.categoria}</span><button class="btn-clear" onclick="askDeleteCategory(${c.id})">Eliminar</button></li>`
-    ).join('');
-}
-
-function askDeleteCategory(id) {
-    resetPendingDeletes();
-    categoryIdPendingDelete = id;
-    const cat = categories.find(c => c.id === id);
-    document.getElementById('confirmMessage').innerText =
-        `¿Eliminar la categoría "${cat ? cat.categoria : ''}"? Las recetas asignadas quedarán sin categoría.`;
-    document.getElementById('confirmModal').style.display = 'flex';
-}
-
-// -------------------- MENÚ SEMANAL --------------------
-// El borrador del menú en curso se guarda en la tabla "menu_semanal_actual"
-// (id, dia, tipo_comida, receta_id) para que sobreviva a cerrar la app.
 
 async function loadCurrentWeekMenuDraft() {
     try {
-        const data = await supabaseRequest(
-            'menu_semanal_actual',
-            '?select=id,dia,tipo_comida,receta_id,recetas(title)'
-        );
+        const data = await supabaseRequest('menu_semanal_actual', '?select=id,dia,tipo_comida,receta_id,recetas(title)');
         currentWeekMenu = {};
         (data || []).forEach(row => {
             currentWeekMenu[`${row.dia}_${row.tipo_comida}`] = {
@@ -579,9 +390,46 @@ async function loadCurrentWeekMenuDraft() {
             };
         });
     } catch (e) {
-        console.error('Error cargando el borrador del menú semanal:', e);
+        console.error('Error cargando el menú semanal:', e);
         currentWeekMenu = {};
     }
+}
+
+function renderWeek() {
+    $('weeklyGrid').innerHTML = generateWeeklyGridHtml(currentWeekMenu, false);
+    const filled = Object.keys(currentWeekMenu).length;
+    const total = DIAS.length * TIPOS_COMIDA.length;
+    $('weekProgress').textContent = filled === 0
+        ? 'Toca «+ Elegir» en cualquier hueco para planificar la semana.'
+        : `${filled} de ${total} comidas planificadas`;
+
+    const today = todayDiaId();
+    $('todayCard').innerHTML = `<h3>Hoy, ${diaNombre(today).toLowerCase()}</h3>` +
+        TIPOS_COMIDA.map(tipo => slotHtml(today, tipo, currentWeekMenu, false)).join('');
+}
+
+function slotHtml(dia, tipo, menuData, readOnly) {
+    const key = `${dia}_${tipo}`;
+    const entry = menuData[key];
+    let body;
+    if (entry) {
+        body = `<button class="slot-filled" type="button" data-action="open-recipe" data-id="${entry.receta_id}">${escapeHtml(entry.title)}</button>` +
+            (readOnly ? '' : `<button class="slot-remove" type="button" data-action="slot-remove" data-key="${key}" aria-label="Quitar ${escapeHtml(entry.title)}">×</button>`);
+    } else {
+        body = readOnly
+            ? '<span class="slot-empty-text">—</span>'
+            : `<button class="slot-empty" type="button" data-action="slot-pick" data-dia="${dia}" data-tipo="${tipo}">+ Elegir</button>`;
+    }
+    return `<div class="slot"><span class="slot-label">${tipo}</span><div class="slot-body">${body}</div></div>`;
+}
+
+function generateWeeklyGridHtml(menuData, readOnly) {
+    const today = todayDiaId();
+    return '<div class="week-grid">' + DIAS.map(d => {
+        const isToday = !readOnly && d.id === today;
+        return `<div class="day-card${isToday ? ' today' : ''}"><h4>${d.nombre}${isToday ? ' <span class="today-tag">Hoy</span>' : ''}</h4>` +
+            TIPOS_COMIDA.map(tipo => slotHtml(d.id, tipo, menuData, readOnly)).join('') + '</div>';
+    }).join('') + '</div>';
 }
 
 async function addToCurrentWeekMenu(dia, tipo, recipe) {
@@ -598,204 +446,465 @@ async function addToCurrentWeekMenu(dia, tipo, recipe) {
             method: 'POST',
             body: JSON.stringify([{ dia, tipo_comida: tipo, receta_id: recipe.id }])
         });
-        const row = inserted[0];
-        currentWeekMenu[key] = { receta_id: recipe.id, title: recipe.title, draftId: row.id };
+        currentWeekMenu[key] = { receta_id: recipe.id, title: recipe.title, draftId: inserted[0].id };
     }
-    renderWeeklyGrid();
-    alert(`"${recipe.title}" añadida a ${DIAS.find(d => d.id === dia).nombre} - ${tipo}`);
-}
-
-function setupWeeklyMenuModal() {
-    document.getElementById('openWeeklyMenuBtn').onclick = () => {
-        renderWeeklyGrid();
-        document.getElementById('weeklyMenuModal').style.display = 'flex';
-    };
-    document.getElementById('closeWeeklyMenuModal').onclick = () => {
-        document.getElementById('weeklyMenuModal').style.display = 'none';
-    };
-    document.getElementById('clearWeeklyMenuBtn').onclick = async () => {
-        try {
-            await supabaseRequest('menu_semanal_actual', '?id=not.is.null', { method: 'DELETE' });
-            currentWeekMenu = {};
-            renderWeeklyGrid();
-        } catch (e) {
-            alert('No se pudo vaciar el menú semanal: ' + e.message);
-        }
-    };
-    document.getElementById('saveWeeklyMenuBtn').onclick = saveWeeklyMenu;
-}
-
-function generateWeeklyGridHtml(menuData, readOnly) {
-    // Vista de escritorio: tabla Comida/Cena x Días
-    let tableHtml = '<table class="weekly-grid-table"><thead><tr><th>Comida</th>' +
-        DIAS.map(d => `<th>${d.nombre}</th>`).join('') + '</tr></thead><tbody>';
-    TIPOS_COMIDA.forEach(tipo => {
-        tableHtml += `<tr><td class="weekly-row-label">${tipo}</td>`;
-        DIAS.forEach(d => {
-            const key = `${d.id}_${tipo}`;
-            const entry = menuData[key];
-            if (entry) {
-                tableHtml += `<td class="weekly-cell filled">${entry.title}` +
-                    (readOnly ? '' : ` <button class="remove-item-btn" onclick="removeFromWeeklyMenu('${key}')">×</button>`) +
-                    '</td>';
-            } else {
-                tableHtml += '<td class="weekly-cell empty">—</td>';
-            }
-        });
-        tableHtml += '</tr>';
-    });
-    tableHtml += '</tbody></table>';
-
-    // Vista de móvil: una tarjeta vertical por día
-    let mobileHtml = '<div class="weekly-grid-mobile">';
-    DIAS.forEach(d => {
-        mobileHtml += `<div class="weekly-day-card"><h4>${d.nombre}</h4>`;
-        TIPOS_COMIDA.forEach(tipo => {
-            const key = `${d.id}_${tipo}`;
-            const entry = menuData[key];
-            mobileHtml += `<div class="weekly-day-row"><span class="weekly-day-meal-label">${tipo}</span><span class="weekly-day-meal-value">`;
-            if (entry) {
-                mobileHtml += entry.title +
-                    (readOnly ? '' : ` <button class="remove-item-btn" onclick="removeFromWeeklyMenu('${key}')">×</button>`);
-            } else {
-                mobileHtml += '—';
-            }
-            mobileHtml += '</span></div>';
-        });
-        mobileHtml += '</div>';
-    });
-    mobileHtml += '</div>';
-
-    return tableHtml + mobileHtml;
-}
-
-function renderWeeklyGrid(containerId = 'weeklyGrid', menuData = null, readOnly = false) {
-    const container = document.getElementById(containerId);
-    const data = menuData || currentWeekMenu;
-    container.innerHTML = generateWeeklyGridHtml(data, readOnly);
+    renderWeek();
+    showToast(`«${recipe.title}» → ${diaNombre(dia)}, ${tipo.toLowerCase()}`);
 }
 
 async function removeFromWeeklyMenu(key) {
     const entry = currentWeekMenu[key];
     if (!entry) return;
-    try {
-        if (entry.draftId) {
-            await supabaseRequest('menu_semanal_actual', `?id=eq.${entry.draftId}`, { method: 'DELETE' });
-        }
-        delete currentWeekMenu[key];
-        renderWeeklyGrid();
-    } catch (e) {
-        alert('No se pudo quitar de la semana: ' + e.message);
-    }
+    if (entry.draftId) await supabaseRequest('menu_semanal_actual', `?id=eq.${entry.draftId}`, { method: 'DELETE' });
+    delete currentWeekMenu[key];
+    renderWeek();
+}
+
+async function clearWeekMenu() {
+    await supabaseRequest('menu_semanal_actual', '?id=not.is.null', { method: 'DELETE' });
+    currentWeekMenu = {};
+    renderWeek();
 }
 
 async function saveWeeklyMenu() {
     const entries = Object.entries(currentWeekMenu);
-    if (entries.length === 0) {
-        alert('Añade al menos una receta a tu menú semanal antes de guardarlo.');
-        return;
-    }
+    if (entries.length === 0) return showToast('Añade al menos una receta antes de guardar la semana');
     try {
-        const existing = await supabaseRequest('semanas_guardadas', '?select=semana&order=semana.desc&limit=1');
-        const nextSemana = existing && existing.length > 0 ? existing[0].semana + 1 : 1;
+        const last = await supabaseRequest('semanas_guardadas', '?select=semana&order=semana.desc&limit=1');
+        const nextSemana = last && last.length > 0 ? last[0].semana + 1 : 1;
         const rows = entries.map(([key, val]) => {
             const [dia, tipo] = key.split('_');
             return { semana: nextSemana, dia: Number(dia), tipo_comida: tipo, receta_id: val.receta_id };
         });
         await supabaseRequest('semanas_guardadas', '', { method: 'POST', body: JSON.stringify(rows) });
-        await supabaseRequest('menu_semanal_actual', '?id=not.is.null', { method: 'DELETE' });
-        currentWeekMenu = {};
-        renderWeeklyGrid();
-        alert('Menú semanal guardado correctamente.');
+        askConfirm('Menú guardado en el historial ✅\n¿Vaciar el calendario para empezar una semana nueva?',
+            'Sí, empezar semana nueva', clearWeekMenu, { danger: false, noLabel: 'No, mantenerlo' });
     } catch (e) {
-        alert('No se pudo guardar el menú semanal: ' + e.message);
+        showToast('No se pudo guardar el menú: ' + e.message, true);
     }
 }
 
-// -------------------- MENÚS GUARDADOS --------------------
+async function openWeekIngredients() {
+    const ids = [...new Set(Object.values(currentWeekMenu).map(e => e.receta_id).filter(Boolean))];
+    if (ids.length === 0) return showToast('Primero añade recetas a la semana');
+    const data = await supabaseRequest('recetas', `?select=id,title,ingredients&id=in.(${ids.join(',')})&order=title.asc`) || [];
+    $('ingredientsModalBody').innerHTML = data.map(r =>
+        `<fieldset class="ingredient-group"><legend>${escapeHtml(r.title)}</legend>${ingredientChecklistHtml(parseIngredients(r.ingredients))}</fieldset>`
+    ).join('');
+    openModalEl('ingredientsModal');
+}
 
-function setupSavedMenusModal() {
-    document.getElementById('openSavedMenusBtn').onclick = async () => {
+async function addCheckedIngredients(containerId) {
+    const checked = [...$(containerId).querySelectorAll('input[type="checkbox"]:checked')];
+    if (checked.length === 0) return showToast('Marca primero los ingredientes que te faltan');
+    try {
+        await addShoppingTexts(checked.map(i => i.value));
+        checked.forEach(i => { i.checked = false; });
+        showToast(`🛒 ${checked.length} ${checked.length === 1 ? 'ingrediente añadido' : 'ingredientes añadidos'} a la lista`);
+    } catch (e) {
+        showToast('No se pudieron añadir: ' + e.message, true);
+    }
+}
+
+// -------------------- ELEGIR RECETA PARA UN HUECO --------------------
+
+function setupPickerModal() {
+    $('pickerSearch').addEventListener('input', () => {
+        clearTimeout(pickerSearchTimer);
+        pickerSearchToken++;
+        if ($('pickerSearch').value.trim()) $('pickerResults').innerHTML = '<p class="hint">Buscando…</p>';
+        pickerSearchTimer = setTimeout(renderPickerResults, 250);
+    });
+    $('pickerRandomBtn').onclick = async () => {
         try {
-            await loadSavedMenus();
-            currentlyViewedSemana = null;
-            renderSavedMenusList();
-            document.getElementById('savedMenuDetail').innerHTML = '';
-            document.getElementById('savedMenuDetailTitle').innerHTML = '';
-            document.getElementById('savedMenusModal').style.display = 'flex';
+            const r = await getRandomRecipe();
+            if (r) await pickRecipeForSlot(r);
         } catch (e) {
-            alert('No se pudieron cargar los menús guardados: ' + e.message);
+            showToast(e.message, true);
         }
     };
-    document.getElementById('closeSavedMenusModal').onclick = () => {
-        document.getElementById('savedMenusModal').style.display = 'none';
+}
+
+function openRecipePicker(dia, tipo) {
+    pickerSlot = { dia, tipo };
+    $('pickerTitle').textContent = `${diaNombre(dia)} · ${tipo}`;
+    $('pickerSearch').value = '';
+    renderPickerResults();
+    openModalEl('recipePickerModal');
+    $('pickerSearch').focus();
+}
+
+function pickerItemHtml(r) {
+    const fav = isFavorite(r.id) ? '⭐ ' : '';
+    return `<button class="picker-item" type="button" data-action="pick-recipe" data-id="${r.id}" data-title="${escapeHtml(r.title)}">` +
+        `<span>${fav}${escapeHtml(r.title)}</span><small>${escapeHtml(categoryName(r.categoria))}</small></button>`;
+}
+
+async function renderPickerResults() {
+    const list = $('pickerResults');
+    const query = $('pickerSearch').value.trim();
+    const token = ++pickerSearchToken;
+    if (!query) {
+        list.innerHTML = favoriteRecipes.length
+            ? '<p class="picker-section">⭐ Tus favoritas</p>' + favoriteRecipes.map(pickerItemHtml).join('')
+            : '<p class="hint">Escribe para buscar entre todas las recetas, o pulsa 🎲.</p>';
+        return;
+    }
+    list.innerHTML = '<p class="hint">Buscando…</p>';
+    try {
+        const params = new URLSearchParams({
+            select: 'id,title,categoria',
+            order: 'title.asc',
+            limit: '40',
+            title: 'imatch.' + accentInsensitivePattern(query)
+        });
+        const data = await supabaseRequest('recetas', '?' + params) || [];
+        if (token !== pickerSearchToken) return;
+        data.sort((a, b) => Number(isFavorite(b.id)) - Number(isFavorite(a.id)));
+        list.innerHTML = data.length ? data.map(pickerItemHtml).join('') : '<p class="hint">No hay recetas con ese nombre.</p>';
+    } catch (e) {
+        if (token === pickerSearchToken) list.innerHTML = '<p class="hint">No se pudo buscar. Revisa la conexión.</p>';
+    }
+}
+
+async function pickRecipeForSlot(recipe) {
+    if (!pickerSlot) return;
+    await addToCurrentWeekMenu(pickerSlot.dia, pickerSlot.tipo, recipe);
+    closeModalEl('recipePickerModal');
+}
+
+// -------------------- RECETAS (catálogo) --------------------
+
+function setupRecipesView() {
+    $('searchInput').addEventListener('input', () => {
+        clearTimeout(recipeSearchTimer);
+        recipeSearchTimer = setTimeout(() => {
+            currentRecipePage = 0;
+            refreshRecipes();
+        }, 300);
+    });
+    $('searchMode').addEventListener('change', () => {
+        currentRecipePage = 0;
+        if ($('searchInput').value.trim()) refreshRecipes();
+    });
+    $('randomRecipeBtn').onclick = () => suggestRandomRecipe();
+    $('openAddRecipeBtn').onclick = () => {
+        renderCategorySelects();
+        openModalEl('addRecipeModal');
+        $('newRecipeTitle').focus();
     };
 }
 
-async function loadSavedMenus() {
-    const data = await supabaseRequest(
-        'semanas_guardadas',
-        '?select=id,semana,dia,tipo_comida,receta_id,recetas(title)&order=semana.desc,dia.asc'
-    );
-    savedMenusGrouped = {};
-    (data || []).forEach(row => {
-        if (!savedMenusGrouped[row.semana]) savedMenusGrouped[row.semana] = [];
-        savedMenusGrouped[row.semana].push({
-            id: row.id,
-            dia: row.dia,
-            tipo_comida: row.tipo_comida,
-            receta_id: row.receta_id,
-            title: row.recetas ? row.recetas.title : 'Receta eliminada'
-        });
-    });
+function renderScopeFilters() {
+    const scopes = [
+        { id: 'favoritas', label: `⭐ Favoritas (${favorites.length})` },
+        ...(schema.propia ? [{ id: 'propias', label: '👤 Mis recetas' }] : []),
+        { id: 'todas', label: allRecipesCount ? `📚 Todas (${allRecipesCount.toLocaleString('es-ES')})` : '📚 Todas' }
+    ];
+    $('scopeFilters').innerHTML = scopes.map(s =>
+        `<button type="button" class="${s.id === currentScope ? 'active' : ''}" data-action="set-scope" data-scope="${s.id}">${s.label}</button>`
+    ).join('');
 }
 
-function renderSavedMenusList() {
-    const list = document.getElementById('savedMenusList');
-    const semanas = Object.keys(savedMenusGrouped).sort((a, b) => b - a);
-    if (semanas.length === 0) {
-        list.innerHTML = '<div class="empty-state"><p>Todavía no has guardado ningún menú semanal.</p></div>';
+function renderCategoryFilters() {
+    const all = [{ id: 'Todas', categoria: 'Todas' }, ...categories];
+    $('categoryFilters').innerHTML = all.map(c =>
+        `<button type="button" class="${String(c.id) === String(currentCategoryFilter) ? 'active' : ''}" data-action="filter-cat" data-cat="${c.id}">${escapeHtml(c.categoria)}</button>`
+    ).join('');
+}
+
+function renderCategorySelects() {
+    const options = categories.map(c => `<option value="${c.id}">${escapeHtml(c.categoria)}</option>`).join('');
+    $('newRecipeCategory').innerHTML = options;
+    $('editRecipeCategory').innerHTML = '<option value="">Sin categoría</option>' + options;
+}
+
+function setScope(scope) {
+    currentScope = scope;
+    currentRecipePage = 0;
+    renderScopeFilters();
+    refreshRecipes();
+}
+
+function setCategoryFilter(cat) {
+    currentCategoryFilter = cat === 'Todas' ? 'Todas' : Number(cat);
+    currentRecipePage = 0;
+    renderCategoryFilters();
+    refreshRecipes();
+}
+
+async function refreshRecipes() {
+    const token = ++recipeLoadToken;
+    if (currentScope === 'favoritas') {
+        renderRecipes();
         return;
     }
-    list.innerHTML = semanas.map(semana => {
-        const isOpen = String(currentlyViewedSemana) === String(semana);
-        return `<div class="saved-menu-item">
-            <span>Semana ${semana}</span>
-            <div>
-                <button class="btn btn-secondary" onclick="toggleSavedMenu(${semana})">${isOpen ? 'Ocultar' : 'Ver'}</button>
-                <button class="btn-clear" onclick="askDeleteSavedMenu(${semana})">Eliminar</button>
-            </div>
-        </div>`;
-    }).join('');
-}
-
-function toggleSavedMenu(semana) {
-    if (String(currentlyViewedSemana) === String(semana)) {
-        currentlyViewedSemana = null;
-        document.getElementById('savedMenuDetail').innerHTML = '';
-        document.getElementById('savedMenuDetailTitle').innerHTML = '';
-    } else {
-        currentlyViewedSemana = semana;
-        viewSavedMenu(semana);
+    $('recipesGrid').setAttribute('aria-busy', 'true');
+    try {
+        await loadRecipes();
+        if (token !== recipeLoadToken) return;
+        renderRecipes();
+    } catch (e) {
+        if (token !== recipeLoadToken) return;
+        console.error('Error cargando recetas:', e);
+        $('recipesGrid').innerHTML = '<div class="empty-state"><p>No se pudieron cargar las recetas.</p></div>';
+    } finally {
+        $('recipesGrid').removeAttribute('aria-busy');
     }
-    renderSavedMenusList();
 }
 
-function viewSavedMenu(semana) {
-    const entries = savedMenusGrouped[semana] || [];
-    const menuData = {};
-    entries.forEach(e => {
-        menuData[`${e.dia}_${e.tipo_comida}`] = { receta_id: e.receta_id, title: e.title };
+async function loadRecipes() {
+    const search = $('searchInput').value.trim();
+    const params = new URLSearchParams({
+        select: 'id,title,url,categoria',
+        order: 'title.asc',
+        offset: String(currentRecipePage * RECIPES_PAGE_SIZE),
+        limit: String(RECIPES_PAGE_SIZE)
     });
-    document.getElementById('savedMenuDetailTitle').innerHTML = `<h3>Semana ${semana}</h3>`;
-    renderWeeklyGrid('savedMenuDetail', menuData, true);
+    if (currentCategoryFilter !== 'Todas') params.set('categoria', `eq.${currentCategoryFilter}`);
+    if (currentScope === 'propias') params.set('propia', 'eq.true');
+    const pattern = accentInsensitivePattern(search);
+    if (pattern) params.set($('searchMode').value === 'ingredients' ? 'ingredients' : 'title', 'imatch.' + pattern);
+
+    const { rows, total } = await supabaseCount('recetas', params);
+    recipes = rows;
+    totalRecipes = total;
+    if (currentScope === 'todas' && !pattern && currentCategoryFilter === 'Todas' && allRecipesCount !== total) {
+        allRecipesCount = total;
+        renderScopeFilters();
+    }
 }
 
-function askDeleteSavedMenu(semana) {
-    resetPendingDeletes();
-    semanaPendingDelete = semana;
-    document.getElementById('confirmMessage').innerText = `¿Eliminar la Semana ${semana}? No se podrá recuperar.`;
-    document.getElementById('confirmModal').style.display = 'flex';
+function visibleRecipes() {
+    if (currentScope !== 'favoritas') return recipes;
+    const query = $('searchInput').value.trim();
+    const byIngredients = $('searchMode').value === 'ingredients';
+    return favoriteRecipes.filter(r =>
+        (currentCategoryFilter === 'Todas' || r.categoria === currentCategoryFilter) &&
+        matchesSearch(byIngredients ? r.ingredients : r.title, query)
+    );
+}
+
+function renderRecipes() {
+    const grid = $('recipesGrid');
+    const list = visibleRecipes();
+    const isFavScope = currentScope === 'favoritas';
+    const count = isFavScope ? list.length : totalRecipes;
+    $('recipesCount').textContent = count ? `${count.toLocaleString('es-ES')} ${count === 1 ? 'receta' : 'recetas'}` : '';
+
+    if (list.length === 0) {
+        if (isFavScope && favorites.length === 0) {
+            grid.innerHTML = '<div class="empty-state"><p>Aún no tienes favoritas.</p>' +
+                '<p>Busca en <button class="link-btn" type="button" data-action="set-scope" data-scope="todas">todas las recetas</button> y marca con ☆ las que os gusten.</p></div>';
+        } else if (isFavScope) {
+            grid.innerHTML = '<div class="empty-state"><p>Ninguna favorita coincide.</p>' +
+                '<p><button class="link-btn" type="button" data-action="set-scope" data-scope="todas">Buscar en todas las recetas</button></p></div>';
+        } else {
+            grid.innerHTML = '<div class="empty-state"><p>No hay recetas que coincidan.</p></div>';
+        }
+    } else {
+        grid.innerHTML = list.map(recipeCardHtml).join('');
+    }
+    renderRecipePagination(isFavScope);
+}
+
+function recipeCardHtml(r) {
+    const fav = isFavorite(r.id);
+    return `<article class="card" data-action="open-recipe" data-id="${r.id}" tabindex="0">` +
+        `<div class="card-top"><span class="badge">${escapeHtml(categoryName(r.categoria))}</span>` +
+        `<button class="favorite-btn ${fav ? 'active' : ''}" type="button" data-action="toggle-fav" data-id="${r.id}" ` +
+        `aria-label="${fav ? 'Quitar de favoritas' : 'Añadir a favoritas'}">${fav ? '⭐' : '☆'}</button></div>` +
+        `<h3>${escapeHtml(r.title)}</h3></article>`;
+}
+
+function renderRecipePagination(hide) {
+    const pagination = $('recipePagination');
+    const pageCount = Math.ceil(totalRecipes / RECIPES_PAGE_SIZE);
+    if (hide || pageCount <= 1) {
+        pagination.innerHTML = '';
+        return;
+    }
+    pagination.innerHTML =
+        `<button class="btn btn-secondary" type="button" data-action="page" data-page="${currentRecipePage - 1}" ${currentRecipePage === 0 ? 'disabled' : ''}>Anterior</button>` +
+        `<span>Página ${currentRecipePage + 1} de ${pageCount}</span>` +
+        `<button class="btn btn-secondary" type="button" data-action="page" data-page="${currentRecipePage + 1}" ${currentRecipePage >= pageCount - 1 ? 'disabled' : ''}>Siguiente</button>`;
+}
+
+async function goToRecipePage(page) {
+    currentRecipePage = page;
+    await refreshRecipes();
+    $('view-recetas').scrollIntoView({ behavior: 'smooth' });
+}
+
+// Tarjetas accesibles con teclado
+document.addEventListener('keydown', (e) => {
+    if ((e.key === 'Enter' || e.key === ' ') && e.target.classList && e.target.classList.contains('card')) {
+        e.preventDefault();
+        e.target.click();
+    }
+});
+
+// -------------------- RECETA ALEATORIA --------------------
+
+async function getRandomRecipe() {
+    const useFavorites = favoriteRecipes.length > 0 && (favoriteRecipes.length >= 5 ? Math.random() < 0.7 : Math.random() < 0.5);
+    if (useFavorites) return favoriteRecipes[Math.floor(Math.random() * favoriteRecipes.length)];
+    if (!allRecipesCount) {
+        const { total } = await supabaseCount('recetas', new URLSearchParams({ select: 'id', limit: '1' }));
+        allRecipesCount = total;
+    }
+    const offset = Math.floor(Math.random() * allRecipesCount);
+    const data = await supabaseRequest('recetas', `?select=id,title,categoria&order=id.asc&offset=${offset}&limit=1`);
+    return data && data[0];
+}
+
+async function suggestRandomRecipe() {
+    try {
+        const r = await getRandomRecipe();
+        if (!r) return;
+        randomMode = true;
+        await openRecipe(r.id);
+    } catch (e) {
+        showToast('No se pudo sugerir una receta: ' + e.message, true);
+    }
+}
+
+// -------------------- MODAL DE RECETA --------------------
+
+function setupRecipeModal() {
+    $('modalWeeklyDay').innerHTML = DIAS.map(d => `<option value="${d.id}">${d.nombre}</option>`).join('');
+
+    $('modalAddToWeeklyBtn').onclick = () => {
+        if (!currentRecipe) return;
+        const dia = Number($('modalWeeklyDay').value);
+        const tipo = $('modalWeeklyMealType').value;
+        addToCurrentWeekMenu(dia, tipo, currentRecipe).catch(e => showToast('No se pudo añadir: ' + e.message, true));
+    };
+    $('modalAddIngredientsBtn').onclick = () => addCheckedIngredients('modalIngredients');
+    $('modalFavBtn').onclick = () => currentRecipe && toggleFavorite(currentRecipe.id);
+    $('modalRandomAgainBtn').onclick = () => suggestRandomRecipe();
+
+    $('saveRecipeTitleBtn').onclick = async () => {
+        const title = $('editRecipeTitle').value.trim();
+        if (!currentRecipe || !title) return;
+        try {
+            await supabaseRequest('recetas', `?id=eq.${currentRecipe.id}`, { method: 'PATCH', body: JSON.stringify({ title }) });
+            currentRecipe.title = title;
+            $('modalTitle').innerText = title;
+            await refreshAfterRecipeChange();
+            showToast('Nombre actualizado');
+        } catch (e) {
+            showToast('No se pudo actualizar el nombre: ' + e.message, true);
+        }
+    };
+    $('editRecipeTitle').addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') $('saveRecipeTitleBtn').click();
+    });
+    $('editRecipeCategory').addEventListener('change', async (e) => {
+        if (!currentRecipe) return;
+        const categoria = e.target.value ? Number(e.target.value) : null;
+        try {
+            await supabaseRequest('recetas', `?id=eq.${currentRecipe.id}`, { method: 'PATCH', body: JSON.stringify({ categoria }) });
+            currentRecipe.categoria = categoria;
+            $('modalCategory').innerText = categoryName(categoria);
+            await refreshAfterRecipeChange();
+            showToast('Categoría actualizada');
+        } catch (err) {
+            showToast('No se pudo actualizar la categoría: ' + err.message, true);
+        }
+    });
+    $('deleteRecipeBtn').onclick = () => {
+        if (!currentRecipe) return;
+        const recipe = currentRecipe;
+        askConfirm(`¿Eliminar la receta «${recipe.title}»? Esta acción no se puede deshacer.`, 'Sí, eliminar', async () => {
+            await supabaseRequest('recetas_favoritas', `?receta_id=eq.${recipe.id}`, { method: 'DELETE' });
+            await supabaseRequest('menu_semanal_actual', `?receta_id=eq.${recipe.id}`, { method: 'DELETE' });
+            await supabaseRequest('semanas_guardadas', `?receta_id=eq.${recipe.id}`, { method: 'DELETE' });
+            await supabaseRequest('recetas', `?id=eq.${recipe.id}`, { method: 'DELETE' });
+            closeModalEl('recipeModal');
+            await refreshAfterRecipeChange();
+            showToast('Receta eliminada');
+        });
+    };
+}
+
+async function openRecipe(id) {
+    let detail;
+    try {
+        detail = await supabaseRequest('recetas', `?id=eq.${id}&select=id,title,url,ingredients,steps,categoria`);
+    } catch (e) {
+        showToast('No se pudo cargar la receta: ' + e.message, true);
+        return;
+    }
+    const recipe = detail && detail[0];
+    if (!recipe) return showToast('Esa receta ya no existe', true);
+    currentRecipe = recipe;
+
+    $('modalTitle').innerText = recipe.title;
+    $('modalCategory').innerText = categoryName(recipe.categoria);
+    updateModalFavButton();
+    $('modalRandomAgainBtn').hidden = !randomMode;
+    $('modalWeeklyDay').value = String(todayDiaId());
+    $('modalWeeklyMealType').value = new Date().getHours() >= 17 ? 'Cena' : 'Comida';
+    $('modalIngredients').innerHTML = ingredientChecklistHtml(parseIngredients(recipe.ingredients));
+    $('modalSteps').innerHTML = formatSteps(recipe.steps, recipe.title);
+    $('modalUrlWrapper').innerHTML = /^https?:\/\//i.test(recipe.url || '')
+        ? `<a href="${escapeHtml(recipe.url)}" target="_blank" rel="noopener">🌐 Ver receta original</a>` : '';
+
+    renderCategorySelects();
+    $('editRecipeTitle').value = recipe.title;
+    $('editRecipeCategory').value = recipe.categoria == null ? '' : String(recipe.categoria);
+    document.querySelector('.recipe-edit').open = false;
+
+    openModalEl('recipeModal');
+    document.querySelector('#recipeModal .modal-content').scrollTop = 0;
+}
+
+function updateModalFavButton() {
+    if (!currentRecipe) return;
+    const fav = isFavorite(currentRecipe.id);
+    const btn = $('modalFavBtn');
+    btn.textContent = fav ? '⭐' : '☆';
+    btn.classList.toggle('active', fav);
+    btn.setAttribute('aria-label', fav ? 'Quitar de favoritas' : 'Añadir a favoritas');
+}
+
+async function refreshAfterRecipeChange() {
+    await Promise.all([loadFavorites(), loadCurrentWeekMenuDraft()]);
+    renderScopeFilters();
+    renderWeek();
+    await refreshRecipes();
+}
+
+// -------------------- AÑADIR RECETA --------------------
+
+function setupAddRecipeModal() {
+    $('addRecipeForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const title = $('newRecipeTitle').value.trim();
+        const url = $('newRecipeUrl').value.trim();
+        const ingredients = $('newRecipeIngredients').value.trim();
+        const steps = $('newRecipeSteps').value.trim();
+        const categoria = $('newRecipeCategory').value ? Number($('newRecipeCategory').value) : null;
+        if (!title || !ingredients || !steps) return;
+
+        const row = { title, url: url || null, ingredients, steps, categoria };
+        if (schema.propia) row.propia = true;
+        try {
+            const inserted = await supabaseRequest('recetas', '', { method: 'POST', body: JSON.stringify([row]) });
+            e.target.reset();
+            closeModalEl('addRecipeModal');
+            showToast('Receta guardada');
+            if (schema.propia) setScope('propias');
+            else await refreshRecipes();
+            if (inserted && inserted[0]) {
+                randomMode = false;
+                openRecipe(inserted[0].id);
+            }
+        } catch (err) {
+            showToast('No se pudo guardar la receta: ' + err.message, true);
+        }
+    });
 }
 
 // -------------------- FAVORITOS --------------------
@@ -806,159 +915,247 @@ function isFavorite(recipeId) {
 
 async function toggleFavorite(recipeId) {
     try {
-        const existing = favorites.find(f => f.receta_id === recipeId);
-        if (existing) {
-            await supabaseRequest('recetas_favoritas', `?id=eq.${existing.id}`, { method: 'DELETE' });
+        const existing = favorites.filter(f => f.receta_id === recipeId);
+        if (existing.length) {
+            await supabaseRequest('recetas_favoritas', `?receta_id=eq.${recipeId}`, { method: 'DELETE' });
         } else {
-            await supabaseRequest('recetas_favoritas', '', {
-                method: 'POST',
-                body: JSON.stringify([{ receta_id: recipeId }])
-            });
+            await supabaseRequest('recetas_favoritas', '', { method: 'POST', body: JSON.stringify([{ receta_id: recipeId }]) });
         }
         await loadFavorites();
-        updateFavoritesCount();
+        renderScopeFilters();
         renderRecipes();
-        renderFavoritesGrid();
+        updateModalFavButton();
+        showToast(existing.length ? 'Quitada de favoritas' : '⭐ Añadida a favoritas');
     } catch (e) {
-        console.error('Error actualizando favorito:', e);
+        showToast('No se pudo actualizar la favorita: ' + e.message, true);
     }
-}
-
-function updateFavoritesCount() {
-    const favCount = document.getElementById('favoritesCount');
-    if (favCount) favCount.textContent = favorites.length;
-}
-
-function setupFavoritesModal() {
-    document.getElementById('openFavoritesBtn').onclick = () => {
-        document.getElementById('favoritesModal').style.display = 'flex';
-        document.getElementById('favoritesSearchInput').value = '';
-        document.querySelectorAll('#favoritesFilters button').forEach((b, i) => {
-            b.classList.toggle('active', i === 0);
-        });
-        renderFavoritesGrid();
-    };
-    document.getElementById('closeFavoritesModal').onclick = () => {
-        document.getElementById('favoritesModal').style.display = 'none';
-    };
-    document.getElementById('favoritesSearchInput').addEventListener('input', renderFavoritesGrid);
-    document.getElementById('favoritesFilters').addEventListener('click', (e) => {
-        if (e.target.tagName !== 'BUTTON') return;
-        document.querySelectorAll('#favoritesFilters button').forEach(b => b.classList.remove('active'));
-        e.target.classList.add('active');
-        renderFavoritesGrid();
-    });
-}
-
-function renderFavoritesGrid() {
-    const grid = document.getElementById('favoritesGrid');
-    const query = document.getElementById('favoritesSearchInput').value.toLowerCase();
-    const activeBtn = document.querySelector('#favoritesFilters .active');
-    const currentFavCategory = activeBtn ? activeBtn.dataset.cat : 'Todas';
-
-    const filtered = favoriteRecipes.filter(r => {
-        const categoryMatch = currentFavCategory === 'Todas' || r.categoria === Number(currentFavCategory);
-        const matchQuery = (r.title || '').toLowerCase().includes(query);
-        return categoryMatch && matchQuery;
-    });
-
-    if (favorites.length === 0) {
-        grid.innerHTML = '<div class="empty-state"><p>📭 Aún no tienes favoritas</p><p>Marca recetas con ⭐ en el apartado principal</p></div>';
-        return;
-    }
-    if (filtered.length === 0) {
-        grid.innerHTML = '<div class="empty-state"><p>No hay favoritas en esta categoría</p></div>';
-        return;
-    }
-    grid.innerHTML = filtered.map(recipeCardHtml).join('');
 }
 
 // -------------------- LISTA DE LA COMPRA --------------------
 
-function setupShoppingModal() {
-    document.getElementById('openShoppingBtn').onclick = () => {
-        document.getElementById('shoppingModal').style.display = 'flex';
-        document.getElementById('shoppingSearchInput').focus();
-        renderProductResults();
+function setupShoppingView() {
+    $('shoppingAddForm').addEventListener('submit', (e) => {
+        e.preventDefault();
+        const text = $('shoppingInput').value.trim();
+        if (!text) return;
+        addShoppingFromInput(text)
+            .then(() => {
+                $('shoppingInput').value = '';
+                renderSuggestions();
+            })
+            .catch(showShoppingError);
+    });
+    $('shoppingInput').addEventListener('input', renderSuggestions);
+    $('clearCheckedBtn').onclick = () => clearCheckedItems().catch(showShoppingError);
+    $('clearListBtn').onclick = () => {
+        if (shoppingList.length === 0) return showToast('La lista ya está vacía');
+        askConfirm('¿Vaciar toda la lista de la compra?', 'Sí, vaciar', clearShoppingList);
     };
-    document.getElementById('closeShoppingModal').onclick = closeShoppingModal;
-    document.getElementById('shoppingSearchInput').addEventListener('input', renderProductResults);
-    document.getElementById('addShoppingItemBtn').onclick = () => addSelectedProduct().catch(showShoppingError);
-    document.getElementById('shoppingQuantity').addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') addSelectedProduct().catch(showShoppingError);
-    });
-    document.getElementById('clearListBtn').onclick = () => clearShoppingList().catch(showShoppingError);
 }
 
-function closeShoppingModal() {
-    document.getElementById('shoppingModal').style.display = 'none';
-    clearProductSelection();
+function readLocalChecked() {
+    try {
+        return new Set(JSON.parse(localStorage.getItem(LOCAL_CHECKED_KEY) || '[]'));
+    } catch {
+        return new Set();
+    }
 }
 
-function renderProductResults() {
-    const query = normalizeText(document.getElementById('shoppingSearchInput').value);
-    const results = products.filter(p => normalizeText(p.nombre).includes(query)).slice(0, 12);
-    const resultsEl = document.getElementById('shoppingSearchResults');
-    resultsEl.innerHTML = results.map(p => `<button class="product-result" type="button" data-product-id="${p.id}">${p.nombre}</button>`).join('');
-    resultsEl.querySelectorAll('.product-result').forEach(button => {
-        button.onclick = () => selectProduct(button.dataset.productId);
-    });
+function writeLocalChecked() {
+    try {
+        localStorage.setItem(LOCAL_CHECKED_KEY, JSON.stringify(shoppingList.filter(i => i.comprado).map(i => i.id)));
+    } catch { /* sin almacenamiento local: el tachado dura hasta recargar */ }
 }
 
-function selectProduct(id) {
-    selectedProduct = products.find(p => String(p.id) === String(id));
-    if (!selectedProduct) return;
-    document.getElementById('selectedProductName').textContent = selectedProduct.nombre;
-    document.getElementById('quantityContainer').hidden = false;
-    document.getElementById('shoppingQuantity').focus();
-    document.getElementById('shoppingQuantity').select();
+async function loadShoppingList() {
+    const cols = 'id,id_producto,cantidad,productos(nombre)' + (schema.shoppingExtras ? ',texto,comprado' : '');
+    const data = await supabaseRequest('lista_compra', `?select=${cols}&order=id.asc`);
+    const localChecked = readLocalChecked();
+    shoppingList = (data || []).map(item => ({
+        id: item.id,
+        id_producto: item.id_producto,
+        cantidad: Number.isInteger(item.cantidad) && item.cantidad > 0 ? item.cantidad : 1,
+        nombre: (item.productos && item.productos.nombre) || item.texto || 'Producto',
+        comprado: schema.shoppingExtras ? Boolean(item.comprado) : localChecked.has(item.id)
+    }));
+    renderShoppingList();
+    setShoppingStatus('');
 }
 
-function clearProductSelection() {
-    selectedProduct = null;
-    document.getElementById('quantityContainer').hidden = true;
-    document.getElementById('shoppingQuantity').value = 1;
+function renderShoppingList() {
+    const pending = shoppingList.filter(i => !i.comprado);
+    const done = shoppingList.filter(i => i.comprado);
+    const count = $('cartCount');
+    count.textContent = pending.length;
+    count.hidden = pending.length === 0;
+
+    const listEl = $('shoppingList');
+    if (shoppingList.length === 0) {
+        listEl.innerHTML = '<li class="shopping-empty">La lista está vacía. Escribe arriba o añade ingredientes desde una receta o desde la semana.</li>';
+    } else {
+        listEl.innerHTML = [...pending, ...done].map(item =>
+            `<li class="${item.comprado ? 'checked' : ''}">` +
+            `<label class="shop-check"><input type="checkbox" data-action="shop-toggle" data-id="${item.id}" ${item.comprado ? 'checked' : ''}>` +
+            `<span>${escapeHtml(item.nombre)}</span></label>` +
+            `<div class="qty"><button type="button" data-action="shop-dec" data-id="${item.id}" aria-label="Menos">−</button>` +
+            `<span>${item.cantidad}</span>` +
+            `<button type="button" data-action="shop-inc" data-id="${item.id}" aria-label="Más">+</button></div>` +
+            `<button class="remove-item-btn" type="button" data-action="shop-remove" data-id="${item.id}" aria-label="Quitar ${escapeHtml(item.nombre)}">×</button></li>`
+        ).join('');
+    }
+    $('clearCheckedBtn').hidden = done.length === 0;
 }
 
-async function addSelectedProduct() {
-    const quantity = Number(document.getElementById('shoppingQuantity').value);
-    if (!selectedProduct || !Number.isInteger(quantity) || quantity < 1) return;
-    const existingItem = shoppingList.find(item => item.id_producto === selectedProduct.id);
-    if (existingItem) {
-        await supabaseRequest('lista_compra', `?id=eq.${existingItem.id}`, {
+function renderSuggestions() {
+    const query = normalizeText($('shoppingInput').value.trim().replace(/^\d+\s*[x×]?\s+/i, ''));
+    const box = $('shoppingSuggestions');
+    if (!query) {
+        box.innerHTML = '';
+        return;
+    }
+    const results = products.filter(p => normalizeText(p.nombre).includes(query)).slice(0, 8);
+    box.innerHTML = results.map(p =>
+        `<button class="suggestion" type="button" data-action="add-suggestion" data-id="${escapeHtml(p.id)}">+ ${escapeHtml(p.nombre)}</button>`
+    ).join('');
+}
+
+async function addProductById(id) {
+    const product = products.find(p => String(p.id) === String(id));
+    if (!product) return;
+    const match = $('shoppingInput').value.trim().match(/^(\d+)\s*[x×]?\s+/i);
+    await addProductToList(product, match ? Number(match[1]) : 1);
+    await loadShoppingList();
+    $('shoppingInput').value = '';
+    renderSuggestions();
+    $('shoppingInput').focus();
+    showToast(`🛒 ${product.nombre} añadido`);
+}
+
+async function addProductToList(product, qty) {
+    const existing = shoppingList.find(i => i.id_producto === product.id && !i.comprado);
+    if (existing) {
+        await supabaseRequest('lista_compra', `?id=eq.${existing.id}`, {
             method: 'PATCH',
-            body: JSON.stringify({ cantidad: existingItem.cantidad + quantity })
+            body: JSON.stringify({ cantidad: existing.cantidad + qty })
         });
     } else {
         await supabaseRequest('lista_compra', '', {
             method: 'POST',
-            body: JSON.stringify([{ id_producto: selectedProduct.id, cantidad: quantity }])
+            body: JSON.stringify([{ id_producto: product.id, cantidad: qty }])
         });
     }
-    await loadShoppingList();
-    clearProductSelection();
 }
 
-function removeItem(index) {
-    const item = shoppingList[index];
+async function addShoppingFromInput(text) {
+    let qty = 1;
+    let name = text;
+    const m = text.match(/^(\d+)\s*[x×]?\s+(.+)$/i);
+    if (m) {
+        qty = Math.max(1, Number(m[1]));
+        name = m[2].trim();
+    }
+    await addShoppingTexts([name], qty);
+    showToast(`🛒 ${name} añadido`);
+}
+
+// Las altas en la lista van en cola: si dos se solapan (doble toque), ambas calcularían
+// el mismo id de producto nuevo y Supabase devolvería 409.
+let shoppingQueue = Promise.resolve();
+function addShoppingTexts(texts, qty = 1) {
+    const run = shoppingQueue.then(() => addShoppingTextsNow(texts, qty));
+    shoppingQueue = run.catch(() => { });
+    return run;
+}
+
+// Añade textos libres: si coinciden con un producto del catálogo se usa ese producto;
+// si no, se guarda como texto (con la migración) o se crea el producto (sin ella).
+async function addShoppingTextsNow(texts, qty) {
+    const textRows = [];
+    for (const raw of texts) {
+        const name = raw.trim();
+        if (!name) continue;
+        const key = normalizeText(name);
+        const product = products.find(p => normalizeText(p.nombre) === key);
+        if (product) {
+            await addProductToList(product, qty);
+            await loadShoppingList();
+            continue;
+        }
+        const existing = shoppingList.find(i => !i.comprado && normalizeText(i.nombre) === key);
+        if (existing) {
+            await supabaseRequest('lista_compra', `?id=eq.${existing.id}`, {
+                method: 'PATCH',
+                body: JSON.stringify({ cantidad: existing.cantidad + qty })
+            });
+            continue;
+        }
+        if (schema.shoppingExtras) {
+            textRows.push({ texto: name, cantidad: qty, id_producto: null });
+        } else {
+            const created = await supabaseRequest('productos', '', {
+                method: 'POST',
+                body: JSON.stringify([{ id: createProductId(), nombre: name.charAt(0).toUpperCase() + name.slice(1) }])
+            });
+            products.push(created[0]);
+            await addProductToList(created[0], qty);
+        }
+    }
+    if (textRows.length) await supabaseRequest('lista_compra', '', { method: 'POST', body: JSON.stringify(textRows) });
+    await loadShoppingList();
+}
+
+async function toggleShoppingItem(id) {
+    const item = shoppingList.find(i => i.id === id);
     if (!item) return;
-    supabaseRequest('lista_compra', `?id=eq.${item.id}`, { method: 'DELETE' })
-        .then(loadShoppingList)
-        .catch(showShoppingError);
+    item.comprado = !item.comprado;
+    renderShoppingList();
+    if (!schema.shoppingExtras) {
+        writeLocalChecked();
+        return;
+    }
+    try {
+        await supabaseRequest('lista_compra', `?id=eq.${id}`, { method: 'PATCH', body: JSON.stringify({ comprado: item.comprado }) });
+    } catch (e) {
+        item.comprado = !item.comprado;
+        renderShoppingList();
+        showShoppingError(e);
+    }
+}
+
+async function changeShoppingQuantity(id, delta) {
+    const item = shoppingList.find(i => i.id === id);
+    if (!item) return;
+    const cantidad = item.cantidad + delta;
+    if (cantidad < 1) return removeShoppingItem(id);
+    item.cantidad = cantidad;
+    renderShoppingList();
+    try {
+        await supabaseRequest('lista_compra', `?id=eq.${id}`, { method: 'PATCH', body: JSON.stringify({ cantidad }) });
+    } catch (e) {
+        showShoppingError(e);
+        await loadShoppingList();
+    }
+}
+
+async function removeShoppingItem(id) {
+    await supabaseRequest('lista_compra', `?id=eq.${id}`, { method: 'DELETE' });
+    await loadShoppingList();
+    writeLocalChecked();
+}
+
+async function clearCheckedItems() {
+    const ids = shoppingList.filter(i => i.comprado).map(i => i.id);
+    if (ids.length === 0) return;
+    await supabaseRequest('lista_compra', `?id=in.(${ids.join(',')})`, { method: 'DELETE' });
+    await loadShoppingList();
+    writeLocalChecked();
+    showToast(`${ids.length} ${ids.length === 1 ? 'producto quitado' : 'productos quitados'}`);
 }
 
 async function clearShoppingList() {
     await supabaseRequest('lista_compra', '?id=not.is.null', { method: 'DELETE' });
     await loadShoppingList();
-}
-
-function renderShoppingList() {
-    const listEl = document.getElementById('shoppingList');
-    document.getElementById('cartCount').textContent = shoppingList.length;
-    listEl.innerHTML = shoppingList.map((item, index) =>
-        '<li><span>' + item.nombre + '</span><span class="shopping-item-quantity">' + item.cantidad +
-        '</span><button class="remove-item-btn" onclick="removeItem(' + index + ')">Quitar</button></li>'
-    ).join('');
+    writeLocalChecked();
 }
 
 function showShoppingError(error) {
@@ -967,99 +1164,266 @@ function showShoppingError(error) {
 }
 
 function setShoppingStatus(message, isError = false) {
-    const statusEl = document.getElementById('shoppingStatus');
-    if (!statusEl) return;
-    statusEl.textContent = message;
-    statusEl.classList.toggle('shopping-status-error', isError);
+    const el = $('shoppingStatus');
+    el.textContent = message;
+    el.classList.toggle('status-error', isError);
 }
 
-function normalizeText(text) {
-    return String(text).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-}
-
-// -------------------- GESTIÓN DE PRODUCTOS (añadir/eliminar del catálogo) --------------------
+// -------------------- PRODUCTOS (catálogo de sugerencias) --------------------
 
 function setupProductManagerModal() {
-    document.getElementById('openProductManagerBtn').onclick = () => {
+    $('openProductManagerBtn').onclick = () => {
         renderProductManagerList();
-        document.getElementById('productManagerModal').style.display = 'flex';
+        openModalEl('productManagerModal');
     };
-    document.getElementById('closeProductManagerModal').onclick = () => {
-        document.getElementById('productManagerModal').style.display = 'none';
-    };
-    document.getElementById('addProductBtn').onclick = async () => {
-        const input = document.getElementById('newProductName');
+    $('addProductBtn').onclick = async () => {
+        const input = $('newProductName');
         const name = input.value.trim();
         if (!name) return;
-        const id = createProductId();
+        if (products.some(p => normalizeText(p.nombre) === normalizeText(name))) return showToast('Ese producto ya existe');
         try {
             await supabaseRequest('productos', '', {
                 method: 'POST',
-                body: JSON.stringify([{ id, nombre: name }])
+                body: JSON.stringify([{ id: createProductId(), nombre: name }])
             });
             input.value = '';
             await loadProducts();
-            renderProductResults();
             renderProductManagerList();
         } catch (e) {
-            alert('No se pudo añadir el producto: ' + e.message);
+            showToast('No se pudo añadir el producto: ' + e.message, true);
         }
     };
-    document.getElementById('newProductName').addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') document.getElementById('addProductBtn').click();
+    $('newProductName').addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') $('addProductBtn').click();
     });
 }
 
 function createProductId() {
-    const numericIds = products
-        .map(product => Number(product.id))
-        .filter(id => Number.isSafeInteger(id) && id > 0);
+    const numericIds = products.map(p => Number(p.id)).filter(id => Number.isSafeInteger(id) && id > 0);
     return numericIds.length > 0 ? Math.max(...numericIds) + 1 : 1;
 }
 
 function renderProductManagerList() {
-    const list = document.getElementById('productManagerList');
-    if (products.length === 0) {
-        list.innerHTML = '<li>No hay productos todavía.</li>';
-        return;
-    }
-    list.innerHTML = products.map(p =>
-        `<li><span>${p.nombre}</span><button class="btn-clear" onclick="askDeleteProduct(${JSON.stringify(p.id)})">Eliminar</button></li>`
+    const list = $('productManagerList');
+    list.innerHTML = products.length === 0 ? '<li>No hay productos todavía.</li>' : products.map(p =>
+        `<li><span>${escapeHtml(p.nombre)}</span><button class="btn-clear" type="button" data-action="product-delete" data-id="${escapeHtml(p.id)}">Eliminar</button></li>`
     ).join('');
 }
 
 function askDeleteProduct(id) {
-    resetPendingDeletes();
-    productIdPendingDelete = id;
-    const product = products.find(p => p.id === id);
-    document.getElementById('confirmMessage').innerText =
-        `¿Eliminar el producto "${product ? product.nombre : ''}"? Se quitará también de tu lista de la compra si está en ella.`;
-    document.getElementById('confirmModal').style.display = 'flex';
-}
-
-// -------------------- UTILIDADES DE INTERFAZ --------------------
-
-function setupBackToTop() {
-    const backToTopBtn = document.getElementById('backToTopBtn');
-    window.addEventListener('scroll', () => {
-        backToTopBtn.hidden = window.scrollY < 500;
-    }, { passive: true });
-    backToTopBtn.addEventListener('click', () => {
-        window.scrollTo({ top: 0, behavior: 'smooth' });
+    const product = products.find(p => String(p.id) === String(id));
+    if (!product) return;
+    askConfirm(`¿Eliminar el producto «${product.nombre}»? Se quitará también de la lista de la compra.`, 'Sí, eliminar', async () => {
+        await supabaseRequest('lista_compra', `?id_producto=eq.${product.id}`, { method: 'DELETE' });
+        await supabaseRequest('productos', `?id=eq.${product.id}`, { method: 'DELETE' });
+        await Promise.all([loadProducts(), loadShoppingList()]);
+        renderProductManagerList();
     });
 }
 
-function setupGlobalModalClose() {
-    window.onclick = (e) => {
-        const modals = ['recipeModal', 'shoppingModal', 'favoritesModal', 'addRecipeModal',
-            'categoryManagerModal', 'weeklyMenuModal', 'savedMenusModal', 'confirmModal',
-            'categoryPickerModal', 'renameRecipeModal', 'productManagerModal'];
-        modals.forEach(id => {
-            const modal = document.getElementById(id);
-            if (modal && e.target === modal) {
-                if (id === 'shoppingModal') closeShoppingModal();
-                else modal.style.display = 'none';
-            }
-        });
+// -------------------- CATEGORÍAS --------------------
+
+function setupCategoryManagerModal() {
+    $('openCategoryManagerBtn').onclick = () => {
+        renderCategoryManagerList();
+        openModalEl('categoryManagerModal');
     };
+    $('addCategoryBtn').onclick = async () => {
+        const input = $('newCategoryName');
+        const name = input.value.trim();
+        if (!name) return;
+        try {
+            await supabaseRequest('categoria_recetas', '', { method: 'POST', body: JSON.stringify([{ categoria: name }]) });
+            input.value = '';
+            await afterCategoriesChange();
+        } catch (e) {
+            showToast('No se pudo añadir la categoría: ' + e.message, true);
+        }
+    };
+    $('newCategoryName').addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') $('addCategoryBtn').click();
+    });
+}
+
+async function afterCategoriesChange() {
+    await loadCategories();
+    renderCategoryFilters();
+    renderCategorySelects();
+    renderCategoryManagerList();
+    renderRecipes();
+}
+
+function renderCategoryManagerList() {
+    const list = $('categoryManagerList');
+    list.innerHTML = categories.length === 0 ? '<li>No hay categorías todavía.</li>' : categories.map(c =>
+        `<li><span>${escapeHtml(c.categoria)}</span><button class="btn-clear" type="button" data-action="cat-delete" data-id="${c.id}">Eliminar</button></li>`
+    ).join('');
+}
+
+function askDeleteCategory(id) {
+    const cat = categories.find(c => c.id === id);
+    if (!cat) return;
+    askConfirm(`¿Eliminar la categoría «${cat.categoria}»? Sus recetas quedarán sin categoría.`, 'Sí, eliminar', async () => {
+        await supabaseRequest('recetas', `?categoria=eq.${id}`, { method: 'PATCH', body: JSON.stringify({ categoria: null }) });
+        await supabaseRequest('categoria_recetas', `?id=eq.${id}`, { method: 'DELETE' });
+        if (currentCategoryFilter === id) currentCategoryFilter = 'Todas';
+        await afterCategoriesChange();
+        await refreshRecipes();
+    });
+}
+
+// -------------------- MENÚS GUARDADOS --------------------
+
+async function openSavedMenus() {
+    try {
+        await loadSavedMenus();
+        currentlyViewedSemana = null;
+        renderSavedMenusList();
+        $('savedMenuDetail').innerHTML = '';
+        $('savedMenuDetailTitle').innerHTML = '';
+        openModalEl('savedMenusModal');
+    } catch (e) {
+        showToast('No se pudieron cargar los menús guardados: ' + e.message, true);
+    }
+}
+
+async function loadSavedMenus() {
+    const cols = 'id,semana,dia,tipo_comida,receta_id,recetas(title)' + (schema.menuFecha ? ',creado_en' : '');
+    const data = await supabaseRequest('semanas_guardadas', `?select=${cols}&order=semana.desc,dia.asc`);
+    savedMenusGrouped = {};
+    (data || []).forEach(row => {
+        if (!savedMenusGrouped[row.semana]) savedMenusGrouped[row.semana] = [];
+        savedMenusGrouped[row.semana].push({
+            dia: row.dia,
+            tipo_comida: row.tipo_comida,
+            receta_id: row.receta_id,
+            creado_en: row.creado_en,
+            title: row.recetas ? row.recetas.title : 'Receta eliminada'
+        });
+    });
+}
+
+function savedMenuLabel(semana) {
+    const first = (savedMenusGrouped[semana] || [])[0];
+    if (first && first.creado_en) {
+        const fecha = new Date(first.creado_en).toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: 'numeric' });
+        return `Menú ${semana} · ${fecha}`;
+    }
+    return `Menú ${semana}`;
+}
+
+function renderSavedMenusList() {
+    const list = $('savedMenusList');
+    const semanas = Object.keys(savedMenusGrouped).sort((a, b) => b - a);
+    if (semanas.length === 0) {
+        list.innerHTML = '<div class="empty-state"><p>Todavía no has guardado ningún menú.</p><p>Usa «💾 Guardar en el historial» en la pestaña Semana.</p></div>';
+        return;
+    }
+    list.innerHTML = semanas.map(semana => {
+        const isOpen = String(currentlyViewedSemana) === String(semana);
+        const n = savedMenusGrouped[semana].length;
+        return `<div class="saved-menu-item">
+            <span>${escapeHtml(savedMenuLabel(semana))} <small class="hint">(${n} ${n === 1 ? 'comida' : 'comidas'})</small></span>
+            <div>
+                <button class="btn btn-secondary" type="button" data-action="saved-toggle" data-semana="${semana}">${isOpen ? 'Ocultar' : 'Ver'}</button>
+                <button class="btn btn-primary" type="button" data-action="saved-repeat" data-semana="${semana}">🔁 Repetir</button>
+                <button class="btn-clear" type="button" data-action="saved-delete" data-semana="${semana}" aria-label="Eliminar">🗑️</button>
+            </div>
+        </div>`;
+    }).join('');
+}
+
+function toggleSavedMenu(semana) {
+    if (String(currentlyViewedSemana) === String(semana)) {
+        currentlyViewedSemana = null;
+        $('savedMenuDetail').innerHTML = '';
+        $('savedMenuDetailTitle').innerHTML = '';
+    } else {
+        currentlyViewedSemana = semana;
+        const menuData = {};
+        (savedMenusGrouped[semana] || []).forEach(e => {
+            menuData[`${e.dia}_${e.tipo_comida}`] = { receta_id: e.receta_id, title: e.title };
+        });
+        $('savedMenuDetailTitle').innerHTML = `<h3>${escapeHtml(savedMenuLabel(semana))}</h3>`;
+        $('savedMenuDetail').innerHTML = generateWeeklyGridHtml(menuData, true);
+    }
+    renderSavedMenusList();
+}
+
+function repeatSavedMenu(semana) {
+    const entries = (savedMenusGrouped[semana] || []).filter(e => e.receta_id != null);
+    const doRepeat = async () => {
+        await supabaseRequest('menu_semanal_actual', '?id=not.is.null', { method: 'DELETE' });
+        const rows = entries.map(e => ({ dia: e.dia, tipo_comida: e.tipo_comida, receta_id: e.receta_id }));
+        if (rows.length) await supabaseRequest('menu_semanal_actual', '', { method: 'POST', body: JSON.stringify(rows) });
+        await loadCurrentWeekMenuDraft();
+        renderWeek();
+        closeModalEl('savedMenusModal');
+        closeModalEl('settingsModal');
+        goToView('semana');
+        showToast('🔁 Menú copiado a esta semana');
+    };
+    if (Object.keys(currentWeekMenu).length > 0) {
+        askConfirm('Esto sustituirá el menú que tienes ahora en la semana. ¿Continuar?', 'Sí, sustituir', doRepeat, { danger: false });
+    } else {
+        doRepeat().catch(e => showToast('No se pudo copiar el menú: ' + e.message, true));
+    }
+}
+
+function askDeleteSavedMenu(semana) {
+    askConfirm(`¿Eliminar «${savedMenuLabel(semana)}»? No se podrá recuperar.`, 'Sí, eliminar', async () => {
+        await supabaseRequest('semanas_guardadas', `?semana=eq.${semana}`, { method: 'DELETE' });
+        await loadSavedMenus();
+        currentlyViewedSemana = null;
+        renderSavedMenusList();
+        $('savedMenuDetail').innerHTML = '';
+        $('savedMenuDetailTitle').innerHTML = '';
+    });
+}
+
+// -------------------- AJUSTES --------------------
+
+function setupSettingsModal() {
+    $('openSettingsBtn').onclick = () => {
+        const standalone = window.matchMedia('(display-mode: standalone)').matches || navigator.standalone;
+        $('installHint').hidden = Boolean(standalone);
+        openModalEl('settingsModal');
+    };
+    $('settingsSavedMenusBtn').onclick = () => openSavedMenus();
+    $('installAppBtn').onclick = async () => {
+        if (!deferredInstallPrompt) return;
+        deferredInstallPrompt.prompt();
+        await deferredInstallPrompt.userChoice;
+        deferredInstallPrompt = null;
+        $('installAppBtn').hidden = true;
+    };
+}
+
+// -------------------- CONFIRMACIÓN --------------------
+
+function setupConfirmModal() {
+    $('confirmNoBtn').onclick = () => {
+        confirmAction = null;
+        closeModalEl('confirmModal');
+    };
+    $('confirmYesBtn').onclick = async () => {
+        const action = confirmAction;
+        confirmAction = null;
+        closeModalEl('confirmModal');
+        if (!action) return;
+        try {
+            await action();
+        } catch (e) {
+            console.error(e);
+            showToast('No se pudo completar: ' + e.message, true);
+        }
+    };
+}
+
+// -------------------- VOLVER ARRIBA --------------------
+
+function setupBackToTop() {
+    const btn = $('backToTopBtn');
+    window.addEventListener('scroll', () => { btn.hidden = window.scrollY < 600; }, { passive: true });
+    btn.addEventListener('click', () => window.scrollTo({ top: 0, behavior: 'smooth' }));
 }
