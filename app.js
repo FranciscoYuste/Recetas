@@ -49,6 +49,10 @@ function resetPendingDeletes() {
 
 // -------------------- ARRANQUE --------------------
 
+if ('serviceWorker' in navigator && location.protocol !== 'file:') {
+    navigator.serviceWorker.register('./sw.js').catch(e => console.warn('Service worker no registrado:', e));
+}
+
 document.addEventListener('DOMContentLoaded', async () => {
     try {
         await Promise.all([loadRecipes(), loadCategories(), loadFavorites(), loadProducts()]);
