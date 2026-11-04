@@ -448,6 +448,13 @@ const ENLACES = new Set(['de', 'del', 'con', 'y', 'e', 'o', 'u', 'a', 'al', 'en'
     'por', 'sin', 'tipo', 'estilo', 'muy', 'bien', 'más', 'mas', 'un', 'una', 'unos', 'unas', 'cada', 'aprox.', 'aprox']);
 const RX_CANTIDAD = /^(\d+([.,/]\d+)?|½|¼|¾|⅓|⅔)/;
 const RX_MAYUSCULA = /^[A-ZÁÉÍÓÚÑ¿¡]/;
+// Palabras que suelen ir en Mayúscula pero completan el ingrediente anterior:
+// "Jamón Serrano", "Queso Manchego", "Pimiento Rojo", "Aceite de oliva Virgen Extra".
+const COMPLEMENTOS = new Set(['serrano', 'serranos', 'iberico', 'ibericos', 'york', 'manchego', 'curado', 'semicurado',
+    'tierno', 'parmesano', 'reggiano', 'grana', 'padano', 'philadelphia', 'cheddar', 'emmental', 'gouda', 'edam',
+    'virgen', 'extra', 'light', 'fresco', 'fresca', 'frescos', 'frescas', 'natural', 'rojo', 'roja', 'rojos', 'rojas',
+    'verde', 'verdes', 'amarillo', 'amarilla', 'negro', 'negra', 'negros', 'negras', 'blanco', 'blanca', 'blancos',
+    'blancas', 'dulce', 'picante', 'molido', 'molida', 'rallado', 'rallada', 'en', 'de', 'del', 'y']);
 
 function splitIngredientChunk(chunk) {
     const words = chunk.split(/\s+/).filter(Boolean);
@@ -458,7 +465,7 @@ function splitIngredientChunk(chunk) {
         const prev = words[i - 1];
         const prevLower = prev ? prev.toLowerCase() : '';
         const startsQty = RX_CANTIDAD.test(w);
-        const startsUpper = RX_MAYUSCULA.test(w);
+        const startsUpper = RX_MAYUSCULA.test(w) && !COMPLEMENTOS.has(normalizeText(w).replace(/[^a-z]/g, ''));
         const afterLink = ENLACES.has(prevLower) || /[(:]$/.test(prev || '');
         const prevIsQty = prev && (RX_CANTIDAD.test(prev) || /^(un|una|media|medio)$/i.test(prev));
         const insideCaps = isUpperWord(w) && prev && isUpperWord(prev.replace(/[®™]/g, ''));
