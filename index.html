@@ -44,6 +44,7 @@
             <div id="weeklyGrid"></div>
 
             <div class="week-actions">
+                <button id="fillWeekBtn" class="btn btn-secondary" type="button">✨ Rellenar huecos</button>
                 <button id="weekIngredientsBtn" class="btn btn-primary" type="button">🛒 Ingredientes de la semana</button>
                 <button id="saveWeeklyMenuBtn" class="btn btn-secondary" type="button">💾 Guardar en el historial</button>
                 <button id="openSavedMenusBtn" class="btn btn-secondary" type="button">📋 Menús anteriores</button>
@@ -131,6 +132,10 @@
                 <button id="openCategoryManagerBtn" class="settings-item" type="button">🏷️ Categorías</button>
                 <button id="openProductManagerBtn" class="settings-item" type="button">🛠️ Productos de la compra</button>
                 <button id="installAppBtn" class="settings-item" type="button" hidden>📲 Instalar la app</button>
+                <label class="settings-item settings-toggle" for="showThermomixToggle">
+                    <span>🥣 Mostrar recetas de Thermomix</span>
+                    <input type="checkbox" id="showThermomixToggle">
+                </label>
                 <button id="logoutBtn" class="settings-item" type="button">🚪 Cerrar sesión</button>
             </div>
             <p id="installHint" class="hint install-hint">📲 <strong>Tenla en el móvil como una app:</strong><br>
@@ -146,8 +151,12 @@
             <button class="close-btn" data-close="recipeModal" type="button" aria-label="Cerrar">&times;</button>
             <div class="recipe-modal-head">
                 <span id="modalCategory" class="badge"></span>
-                <button id="modalFavBtn" class="favorite-btn" type="button"></button>
+                <div class="recipe-head-actions">
+                    <button id="modalHideBtn" class="hide-btn" type="button" hidden>👎 No me interesa</button>
+                    <button id="modalFavBtn" class="favorite-btn" type="button"></button>
+                </div>
             </div>
+            <p id="modalHiddenNotice" class="hidden-notice" hidden>🙈 Esta receta está oculta: no sale en el buscador ni en las sugerencias.</p>
             <h2 id="modalTitle"></h2>
             <button id="modalRandomAgainBtn" class="btn btn-secondary" type="button" hidden>🎲 Otra sugerencia</button>
 
@@ -161,6 +170,12 @@
                     </select>
                     <button id="modalAddToWeeklyBtn" class="btn btn-primary" type="button">Añadir</button>
                 </div>
+            </div>
+
+            <div id="modalNotesPanel" class="weekly-add-panel notes-panel" hidden>
+                <h3><label for="modalNotes">📝 Nuestras notas</label></h3>
+                <textarea id="modalNotes" rows="2" placeholder="Ej.: menos sal, el doble de salsa, 25 min de horno…"></textarea>
+                <p id="modalNotesStatus" class="hint notes-status" aria-live="polite"></p>
             </div>
 
             <h3>Ingredientes</h3>

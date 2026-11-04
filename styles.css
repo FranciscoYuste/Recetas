@@ -1302,3 +1302,83 @@ textarea:focus {
     color: var(--danger-text);
     font-size: 0.9rem;
 }
+
+/* ---------- Ocultar receta, notas, ajustes, pasillos ---------- */
+
+.recipe-head-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.hide-btn {
+    padding: 6px 10px;
+    background: var(--surface-soft);
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    color: var(--muted-text);
+    cursor: pointer;
+    font: 0.85rem var(--serif);
+}
+
+.hide-btn:hover {
+    border-color: var(--gold-border);
+    color: var(--text);
+}
+
+.hidden-notice {
+    margin: 8px 0 0;
+    padding: 8px 12px;
+    background: var(--surface-soft);
+    border-left: 3px solid var(--primary);
+    border-radius: 4px;
+    color: var(--muted-text);
+    font-size: 0.9rem;
+}
+
+.notes-panel textarea {
+    width: 100%;
+    min-height: 56px;
+    padding: 10px 12px;
+    color: var(--text);
+    background: var(--bg);
+    border: 1px solid var(--gold-border);
+    border-radius: 6px;
+    outline: none;
+    font: 16px var(--serif);
+    resize: vertical;
+}
+
+.notes-status {
+    min-height: 1.2em;
+    margin: 4px 0 0;
+    font-size: 0.8rem;
+}
+
+.settings-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.settings-toggle input {
+    width: 22px;
+    height: 22px;
+    accent-color: var(--primary);
+}
+
+.shopping-list li.shopping-section {
+    display: block;
+    margin-top: 16px;
+    padding: 0 2px 2px;
+    background: none;
+    border: none;
+    color: var(--primary-hover);
+    font: bold 0.85rem var(--serif);
+    letter-spacing: 0.02em;
+}
+
+.shopping-list li.shopping-section:first-child {
+    margin-top: 0;
+}
