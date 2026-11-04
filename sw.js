@@ -1,12 +1,26 @@
 // Service worker: permite instalar la app y abrirla sin conexión.
 // Estrategia "red primero": con internet siempre se sirve la versión nueva;
 // sin internet se usa la última copia guardada. Supabase nunca se cachea.
-const CACHE = 'recetario-v6';
+const CACHE = 'recetario-v7';
 const SHELL = [
     './',
     './index.html',
     './styles.css',
-    './app.js',
+    './js/main.js',
+    './js/config.js',
+    './js/util.js',
+    './js/state.js',
+    './js/api.js',
+    './js/ui.js',
+    './js/catalogo.js',
+    './js/ingredientes.js',
+    './js/pasillos.js',
+    './js/sugerencias.js',
+    './js/semana.js',
+    './js/recetas.js',
+    './js/nevera.js',
+    './js/compra.js',
+    './js/ajustes.js',
     './manifest.webmanifest',
     './img/banner.jpg',
     './img/icon-192.png',

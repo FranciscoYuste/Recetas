@@ -37,6 +37,8 @@ test('cantidad y nombre limpio', () => {
     assert.equal(ingredientParts('1/2 cebolla mediana finamente picada').nombre, 'Cebolla');
     assert.equal(ingredientParts('Sal y pimienta a gusto').nombre, 'Sal y pimienta');
     assert.equal(ingredientParts('1 cubo de CALDO DE POLLO').nombre, 'Caldo de pollo');
+    assert.deepEqual(ingredientParts('1 lámina de hojaldre'), { cantidad: '1', nombre: 'Lámina de hojaldre' });
+    assert.deepEqual(ingredientParts('2 l de agua'), { cantidad: '2 l', nombre: 'Agua' });
 });
 
 test('nombre para la lista de la compra', () => {
@@ -78,4 +80,12 @@ test('pasos numerados', () => {
         ['Lavamos las verduras.', 'Las cortamos en dados.', 'Freímos']);
     assert.deepEqual(parseSteps('Tortilla\nPaso 1: batir\nPaso 2: cuajar', 'Tortilla'), ['batir', 'cuajar']);
     assert.deepEqual(parseSteps(''), []);
+});
+
+test('un párrafo larguísimo se parte en pasos por frases', () => {
+    const frase = 'Cortamos las verduras en trozos pequeños y las reservamos en un bol grande. ';
+    const pasos = parseSteps(frase.repeat(8).trim());
+    assert.ok(pasos.length >= 3, `salen ${pasos.length} pasos`);
+    assert.ok(pasos.every(p => p.length <= 250 + frase.length));
+    assert.equal(pasos.join(' '), frase.repeat(8).trim());
 });

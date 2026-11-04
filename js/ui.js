@@ -5,7 +5,7 @@
 // registerActions({ nombre: (el, event) => ... }). Sirve igual para botones fijos del
 // HTML y para los que se generan con plantillas. data-close="idModal" cierra un modal.
 
-import { $ } from './util.js';
+import { $, escapeHtml } from './util.js';
 
 const actions = {};
 
@@ -56,7 +56,15 @@ export function openModal(id) {
         }
     }
     const content = dialog.querySelector('.modal-content');
-    if (content) content.scrollTop = 0;
+    if (content) {
+        content.scrollTop = 0;
+        // El navegador enfoca el primer botón y en el móvil parece seleccionado; mejor el
+        // contenido (salvo que el modal pida un campo concreto con autofocus).
+        if (!dialog.querySelector('[autofocus]')) {
+            content.tabIndex = -1;
+            content.focus({ preventScroll: true });
+        }
+    }
     return dialog;
 }
 
@@ -68,6 +76,30 @@ export function closeModal(id) {
 export function isModalOpen(id) {
     return Boolean($(id)?.open);
 }
+
+// ---------------------------------------------------------------- menú de opciones
+
+let sheetOptions = [];
+
+// openSheet({ title, subtitle, options: [{ label, run, danger }] })
+export function openSheet({ title, subtitle = '', options }) {
+    sheetOptions = options;
+    $('sheetTitle').textContent = title;
+    $('sheetSubtitle').textContent = subtitle;
+    $('sheetSubtitle').hidden = !subtitle;
+    $('sheetOptions').innerHTML = options.map((o, i) =>
+        `<button class="sheet-option${o.danger ? ' danger' : ''}" type="button" data-action="sheet-option" data-index="${i}">${escapeHtml(o.label)}</button>`
+    ).join('');
+    openModal('sheet');
+}
+
+registerActions({
+    'sheet-option': async (el) => {
+        const option = sheetOptions[Number(el.dataset.index)];
+        closeModal('sheet');
+        if (option) await option.run();
+    }
+});
 
 // ---------------------------------------------------------------- avisos
 

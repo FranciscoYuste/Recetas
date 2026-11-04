@@ -93,7 +93,8 @@ export function ingredientParts(line) {
     let cantidad = '';
     const qty = s.match(new RegExp(
         `^((?:\\d+(?:[.,/]\\d+)?(?:\\s*[½¼¾⅓⅔])?|[½¼¾⅓⅔])(?:\\s+(?:\\d+/\\d+|y\\s+medi[oa]|o\\s+\\d+))?|un[oa]?|medi[oa])\\s*` +
-        `((?:${UNIDADES})\\b\\.?)?\\s*(?:de\\s+|del\\s+)?`, 'i'));
+        // fin de palabra a mano: \b no entiende tildes ("1 lámina" no es "1 l" + "ámina")
+        `((?:${UNIDADES})(?![a-z0-9áéíóúüñ])\\.?)?\\s*(?:de\\s+|del\\s+)?`, 'i'));
     if (qty && qty[0].trim()) {
         cantidad = (qty[1] + (qty[2] ? ' ' + qty[2] : '')).trim();
         s = s.slice(qty[0].length);
@@ -166,7 +167,26 @@ export function parseSteps(steps, title) {
     if (!s) return [];
     let parts = s.split(/\n+/);
     if (parts.length === 1) parts = s.split(/\s(?=\d{1,2}[.)-]?\s+[A-ZÁÉÍÓÚÑ¡¿])/);
-    return parts
+    parts = parts
         .map(p => p.trim().replace(/^(paso\s*)?\d{1,2}\s*[.):-]?\s+(?=\S)/i, '').trim())
         .filter(Boolean);
+    // Un único párrafo larguísimo: se parte por frases en pasos de ~250 caracteres.
+    if (parts.length === 1 && parts[0].length > 350) parts = groupSentences(parts[0], 250);
+    return parts;
+}
+
+function groupSentences(text, max) {
+    const sentences = text.split(/(?<=[.!?])\s+(?=[A-ZÁÉÍÓÚÑ¿¡])/);
+    const steps = [];
+    let current = '';
+    sentences.forEach(sentence => {
+        if (current && current.length + sentence.length > max) {
+            steps.push(current);
+            current = sentence;
+        } else {
+            current = current ? `${current} ${sentence}` : sentence;
+        }
+    });
+    if (current) steps.push(current);
+    return steps;
 }
