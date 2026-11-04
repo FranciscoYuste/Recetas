@@ -1382,3 +1382,191 @@ textarea:focus {
 .shopping-list li.shopping-section:first-child {
     margin-top: 0;
 }
+
+/* ---------- Lo de siempre ---------- */
+
+.btn-small {
+    padding: 7px 12px;
+    font-size: 0.85rem;
+}
+
+.habitual-box {
+    max-width: 640px;
+    margin-top: 14px;
+    padding: 12px 14px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+}
+
+.habitual-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.habitual-head h3 {
+    margin: 0;
+    font-size: 1rem;
+}
+
+.habitual-actions {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.habitual-hint {
+    margin: 8px 0 0;
+    font-size: 0.85rem;
+}
+
+.habitual-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 10px;
+}
+
+.habitual-chips .hint {
+    margin: 0;
+}
+
+.habitual-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 36px;
+    padding: 6px 12px;
+    background: var(--surface-soft);
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    color: var(--text);
+    cursor: pointer;
+    font: 0.95rem var(--serif);
+}
+
+.habitual-chip.fijo {
+    border-color: var(--gold-border);
+}
+
+button.habitual-chip:hover {
+    border-color: var(--primary);
+    color: var(--primary-hover);
+}
+
+.habitual-chip.editing {
+    cursor: default;
+    padding: 2px 4px;
+}
+
+.habitual-chip.editing button {
+    min-width: 32px;
+    min-height: 32px;
+    padding: 0;
+    background: none;
+    border: none;
+    color: var(--muted-text);
+    cursor: pointer;
+    font-size: 1rem;
+}
+
+.habitual-chip.editing button:hover {
+    color: var(--primary-hover);
+}
+
+/* ---------- Importar desde web ---------- */
+
+.import-panel {
+    margin-bottom: 16px;
+    padding: 12px 14px;
+    background: var(--surface);
+    border: 1px dashed var(--gold-border);
+    border-radius: 8px;
+}
+
+.import-panel label {
+    display: block;
+    margin-bottom: 8px;
+    color: var(--muted-text);
+}
+
+.import-panel input {
+    flex: 1;
+    min-width: 0;
+    padding: 10px 12px;
+    color: var(--text);
+    background: var(--bg);
+    border: 1px solid var(--gold-border);
+    border-radius: 6px;
+    outline: none;
+    font-size: 16px;
+}
+
+.import-status {
+    min-height: 1.2em;
+    margin: 8px 0 0;
+}
+
+/* ---------- Nevera ---------- */
+
+#fridgeForm input {
+    flex: 1;
+    min-width: 0;
+    padding: 10px 12px;
+    color: var(--text);
+    background: var(--surface);
+    border: 1px solid var(--gold-border);
+    border-radius: 6px;
+    outline: none;
+    font-size: 16px;
+}
+
+.fridge-results {
+    margin-top: 14px;
+}
+
+.fridge-item {
+    padding: 12px 14px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+}
+
+.fridge-item + .fridge-item {
+    margin-top: 8px;
+}
+
+.fridge-title {
+    display: block;
+    width: 100%;
+    margin-bottom: 6px;
+    padding: 0;
+    background: none;
+    border: none;
+    color: var(--primary-hover);
+    cursor: pointer;
+    font: bold 1.02rem var(--serif);
+    text-align: left;
+}
+
+.fridge-uses,
+.fridge-missing {
+    margin: 6px 0 0;
+    font-size: 0.9rem;
+}
+
+.fridge-uses {
+    color: var(--muted-text);
+}
+
+.fridge-missing.ok {
+    color: var(--primary-hover);
+}
+
+.fridge-item .link-btn {
+    margin-top: 6px;
+    font-size: 0.9rem;
+}

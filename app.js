@@ -27,7 +27,10 @@ let refreshPromise = null; // renovación en curso (para no pedirla dos veces a 
 let appStarted = false;
 
 // datos: columnas recetas.tipo/oculta/notas (supabase/mejoras_datos.sql).
-let schema = { shoppingExtras: false, menuFecha: false, propia: false, datos: false };
+// habituales: tabla compra_habitual (supabase/compra_habitual.sql).
+let schema = { shoppingExtras: false, menuFecha: false, propia: false, datos: false, habituales: false };
+let habituales = [];       // {clave, nombre, veces, fijo, ultima_vez}
+let habitualEditMode = false;
 const THERMOMIX_KEY = 'recetario.thermomix';
 let showThermomix = readFlag(THERMOMIX_KEY);
 let randomPool = { key: null, total: 0 }; // nº de recetas candidatas para sugerencias aleatorias
@@ -105,7 +108,7 @@ async function startApp() {
     $('weeklyGrid').innerHTML = '<p class="hint">Cargando…</p>';
     try {
         await detectSchema();
-        await Promise.all([loadCategories(), loadFavorites(), loadProducts()]);
+        await Promise.all([loadCategories(), loadFavorites(), loadProducts(), loadHabituales()]);
     } catch (e) {
         console.error('Error cargando datos iniciales:', e);
         showToast('No se pudieron cargar los datos. Revisa la conexión.', true);
@@ -125,13 +128,14 @@ async function startApp() {
 
 async function detectSchema() {
     const probe = (table, cols) => supabaseRequest(table, `?select=${cols}&limit=1`).then(() => true, () => false);
-    const [shoppingExtras, menuFecha, propia, datos] = await Promise.all([
+    const [shoppingExtras, menuFecha, propia, datos, habitualesOk] = await Promise.all([
         probe('lista_compra', 'texto,comprado'),
         probe('semanas_guardadas', 'creado_en'),
         probe('recetas', 'propia'),
-        probe('recetas', 'tipo,oculta,notas')
+        probe('recetas', 'tipo,oculta,notas'),
+        probe('compra_habitual', 'clave')
     ]);
-    schema = { shoppingExtras, menuFecha, propia, datos };
+    schema = { shoppingExtras, menuFecha, propia, datos, habituales: habitualesOk };
     const hint = $('schemaHint');
     if (hint && !(shoppingExtras && menuFecha && propia)) {
         hint.hidden = false;
@@ -424,25 +428,126 @@ function askConfirm(message, yesLabel, onYes, { danger = true, noLabel = 'Cancel
 
 // Los ingredientes importados vienen pegados ("camaronesMantecaSal2 cdas."). Se separan
 // por saltos de línea, comas sueltas, minúscula+Mayúscula y antes de "200 gramos de...".
+// -------------------- INGREDIENTES --------------------
+// Los ingredientes importados vienen en una sola cadena con formatos muy distintos:
+//   "6 piezas de Pollo 500 gramos de Jitomate 2 piezas de Chile ancho"
+//   "1 cubo de CALDO MAGGI® (10 g)      3 tazas de agua (750 ml)"
+//   "5 frutillas1/2 bananaTrozos de ananáJugo de 1 naranja"
+//   "Mejillones Ajo Cebolla fresca Pimiento verde Guindilla (opcional)"
+// Se trocean por saltos de línea y espacios múltiples, por palabras pegadas
+// ("frutillas1/2") y, palabra a palabra, antes de una cantidad o de una palabra en
+// Mayúscula, salvo que vengan detrás de un enlace ("de", "con", "y"...).
+
+const UNIDADES = 'unidad(?:es)?|tazas?|cucharadas?(?:\\s+soperas?|\\s+postre)?|cucharaditas?|cdas?\\.?|cditas?\\.?|cdtas?\\.?|' +
+    'pocillos?|ud\\.?|uds\\.?|' +
+    'manojos?|gr\\.?|grs\\.?|gramos?|g|kg\\.?|kilos?|ml|mililitros?|cl|l|litros?|pizcas?|dientes?|latas?|vasos?|' +
+    'chorritos?|chorros?|ramitas?|ramas?|hojas?|rebanadas?|lonchas?|piezas?|sobres?|paquetes?|botes?|tarros?|' +
+    'cubos?|cubitos?|pastillas?|rodajas?|puñados?|copas?|onzas?|oz|lb|libras?|trozos?|tiras?|vainas?|cabezas?|' +
+    'pellizcos?|hebras?|bolsas?|potes?|envases?|tabletas?|barras?|vasitos?|tacitas?|cucharones?';
+const ENLACES = new Set(['de', 'del', 'con', 'y', 'e', 'o', 'u', 'a', 'al', 'en', 'para', 'la', 'el', 'las', 'los',
+    'por', 'sin', 'tipo', 'estilo', 'muy', 'bien', 'más', 'mas', 'un', 'una', 'unos', 'unas', 'cada', 'aprox.', 'aprox']);
+const RX_CANTIDAD = /^(\d+([.,/]\d+)?|½|¼|¾|⅓|⅔)/;
+const RX_MAYUSCULA = /^[A-ZÁÉÍÓÚÑ¿¡]/;
+
+function splitIngredientChunk(chunk) {
+    const words = chunk.split(/\s+/).filter(Boolean);
+    const items = [];
+    let current = [];
+    const isUpperWord = w => w.length > 1 && w === w.toUpperCase() && /[A-ZÁÉÍÓÚÑ]/.test(w);
+    words.forEach((w, i) => {
+        const prev = words[i - 1];
+        const prevLower = prev ? prev.toLowerCase() : '';
+        const startsQty = RX_CANTIDAD.test(w);
+        const startsUpper = RX_MAYUSCULA.test(w);
+        const afterLink = ENLACES.has(prevLower) || /[(:]$/.test(prev || '');
+        const prevIsQty = prev && (RX_CANTIDAD.test(prev) || /^(un|una|media|medio)$/i.test(prev));
+        const insideCaps = isUpperWord(w) && prev && isUpperWord(prev.replace(/[®™]/g, ''));
+        const prevIsUnit = prev && new RegExp(`^(${UNIDADES})$`, 'i').test(prev);
+        const split = current.length > 0 && !afterLink && !prevIsQty && !prevIsUnit && !insideCaps &&
+            (startsQty || startsUpper) && !/^\(/.test(w);
+        if (split) {
+            items.push(current.join(' '));
+            current = [];
+        }
+        current.push(w);
+    });
+    if (current.length) items.push(current.join(' '));
+    return items;
+}
+
 function parseIngredients(raw) {
-    const units = 'unidad(?:es)?|tazas?|cucharadas?(?: soperas?)?|cucharaditas?|cdas?\\.?|cditas?\\.?|manojos?|gr\\.?|gramos?|g|kg|ml|cl|l|litros?|pizcas?|dientes?|latas?|vasos?|chorritos?|chorros?|ramitas?|ramas?|hojas?|rebanadas?|lonchas?|piezas?|sobres?|paquetes?|botes?|tarros?|cubitos?|pastillas?|filetes?|rodajas?|puñados?|copas?|onzas?|lb';
-    const beforeQuantity = new RegExp(`(?<!\\d)\\s(?=(?:\\d+(?:\\s+\\d+/\\d+|[.,/]\\d+)?|½|¼|¾)\\s*(?:${units})\\b)`, 'gi');
     const seen = new Set();
-    return String(raw ?? '')
+    const result = [];
+    String(raw ?? '')
+        .replace(/[®™]/g, '')
         .replace(/^\s*ingredientes:?\s*/i, '')
-        .split(/\n+|\s+,\s*/)
-        .flatMap(part => part
-            .replace(/([a-záéíóúüñ.)])(?=[A-ZÁÉÍÓÚÑ0-9½¼¾])/g, '$1\n')
-            .replace(beforeQuantity, '\n')
-            .split('\n'))
-        .map(s => s.trim().replace(/^[-•*]\s*/, '').replace(/[,;]$/, '').trim())
-        .filter(s => s.length > 1 && !/^ingredientes:?$/i.test(s))
-        .filter(s => {
+        // palabras pegadas: "frutillas1/2", "lenguado1 puñado", "bananaTrozos", "azúcar1 cda."
+        .replace(/([a-záéíóúüñ]\.?|\))(?=[A-ZÁÉÍÓÚÑ]|\d)/g, '$1\n')
+        .split(/\n+|\s{3,}|\t+|\s+,\s+|;\s*|•/)
+        .flatMap(splitIngredientChunk)
+        .map(s => s.trim().replace(/^[-–*·)\],.:]+\s*/, '').replace(/[,.;]+$/, '').trim())
+        .filter(s => s.length > 2 && !/^ingredientes:?$/i.test(s) && !ENLACES.has(s.toLowerCase()))
+        .filter(s => ingredientParts(s).nombre.length > 1)   // fuera restos sueltos como "175 g"
+        .forEach(s => {
             const key = normalizeText(s);
-            if (seen.has(key)) return false;
+            if (seen.has(key)) return;
             seen.add(key);
-            return true;
+            result.push(s);
         });
+    return result;
+}
+
+// "200 gr. de pechuga de pollo (en filetes)" -> { cantidad: "200 gr.", nombre: "Pechuga de pollo" }
+// "Sal y pimienta a gusto" -> { cantidad: "", nombre: "Sal y pimienta" }
+function ingredientParts(line) {
+    let s = String(line || '').trim().replace(/\(s\)/gi, 's');  // "cebolla(s)" -> "cebollas"
+    let cantidad = '';
+    const qty = s.match(new RegExp(
+        `^((?:\\d+(?:[.,/]\\d+)?(?:\\s*[½¼¾⅓⅔])?|[½¼¾⅓⅔])(?:\\s+(?:\\d+/\\d+|y\\s+medi[oa]|o\\s+\\d+))?|un[oa]?|medi[oa])\\s*` +
+        `((?:${UNIDADES})\\b\\.?)?\\s*(?:de\\s+|del\\s+)?`, 'i'));
+    if (qty && qty[0].trim()) {
+        cantidad = (qty[1] + (qty[2] ? ' ' + qty[2] : '')).trim();
+        s = s.slice(qty[0].length);
+    }
+    const nombre = s
+        .replace(/\s*\([^)]*\)\s*/g, ' ')                     // "(250 g)", "(opcional)"
+        .replace(/\s*,.*$/, '')                               // ", picada finamente"
+        .replace(/\s+(a gusto|al gusto|c\/n|cantidad necesaria|opcional|para decorar|para servir)\b.*$/i, '')
+        // preparación: "finamente picada", "pelada y cortada en dados", "sin piel"
+        .replace(/\s+(y\s+)?(pelad|picad|cortad|troce|lavad|limpi|cocid|escurrid|desmenuzad|batid|derretid|tamizad|machacad|triturad|laminad|filetead|deshuesad|finamente|sin piel|sin hueso|en (tiras|dados|rodajas|trozos|tajadas|juliana|cubos|cubitos|láminas|laminas|polvo para))\S*.*$/i, '')
+        .replace(/\s+(mediano|mediana|medianos|medianas|grande|grandes|pequeño|pequeña|pequeños|pequeñas|maduro|madura|maduros|maduras)\b/gi, '')
+        .replace(/\s+v\.?\s*e\.?$/i, ' virgen extra')
+        .replace(/(\s+(de|del|en|y|o|con|a|al|para))+$/i, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+    const bonito = nombre === nombre.toUpperCase() ? nombre.toLowerCase() : nombre; // "CALDO DE POLLO" -> "caldo de pollo"
+    return { cantidad, nombre: bonito ? bonito.charAt(0).toUpperCase() + bonito.slice(1) : '' };
+}
+
+// Texto para la lista de la compra: "Pechuga de pollo (200 gr.)"
+function ingredientListName(line) {
+    const { cantidad, nombre } = ingredientParts(line);
+    if (!nombre) return String(line || '').trim();
+    return cantidad && !/^(un[oa]?|1)$/i.test(cantidad) ? `${nombre} (${cantidad})` : nombre;
+}
+
+// Clave para comparar productos: sin cantidades, sin tildes y en singular.
+// "2 Tomates", "tomate" y "Tomates (500 g)" -> "tomate"
+function singularWord(w) {
+    // palabras acabadas en l, n, r hacen el plural en -es: limones, tallarines, cereales, panes
+    if (w.length > 4 && /[aeiou][lnr]es$/.test(w)) return w.slice(0, -2);
+    if (w.length > 3 && /[aeiou]s$/.test(w)) return w.slice(0, -1);         // tomates -> tomate
+    return w;
+}
+
+function shoppingKey(text) {
+    const { nombre } = ingredientParts(text);
+    return normalizeText(nombre || text)
+        .replace(/[^a-z0-9 ]/g, ' ')
+        .split(/\s+/)
+        .filter(Boolean)
+        .map(singularWord)
+        .join(' ');
 }
 
 function formatSteps(steps, title) {
@@ -458,7 +563,7 @@ function formatSteps(steps, title) {
 function ingredientChecklistHtml(items) {
     if (items.length === 0) return '<p class="hint">Sin ingredientes.</p>';
     return '<ul class="ingredient-checklist">' + items.map(i =>
-        `<li><label><input type="checkbox" value="${escapeHtml(i)}"><span>${escapeHtml(i)}</span></label></li>`
+        `<li><label><input type="checkbox" value="${escapeHtml(ingredientListName(i))}"><span>${escapeHtml(i)}</span></label></li>`
     ).join('') + '</ul>';
 }
 
@@ -506,6 +611,10 @@ const ACTIONS = {
     'shop-dec': (el) => changeShoppingQuantity(Number(el.dataset.id), -1),
     'shop-remove': (el) => removeShoppingItem(Number(el.dataset.id)),
     'add-suggestion': (el) => addProductById(el.dataset.id),
+    'habitual-add': (el) => addHabitual(el.dataset.clave),
+    'fridge-add-missing': (el) => addFridgeMissing(Number(el.dataset.id)),
+    'habitual-pin': (el) => toggleHabitualFijo(el.dataset.clave),
+    'habitual-forget': (el) => forgetHabitual(el.dataset.clave),
     'saved-toggle': (el) => toggleSavedMenu(el.dataset.semana),
     'saved-repeat': (el) => repeatSavedMenu(el.dataset.semana),
     'saved-delete': (el) => askDeleteSavedMenu(el.dataset.semana),
@@ -538,7 +647,8 @@ function setupGlobalHandlers() {
     document.addEventListener('keydown', (e) => {
         if (e.key !== 'Escape') return;
         const open = [...document.querySelectorAll('.modal')].filter(m => m.style.display === 'flex');
-        const top = open.find(m => m.id === 'confirmModal') || open[open.length - 1];
+        // la receta se abre por encima de otros modales (nevera, menús guardados)
+        const top = open.find(m => m.id === 'confirmModal') || open.find(m => m.id === 'recipeModal') || open[open.length - 1];
         if (top) closeModalEl(top.id);
     });
 }
@@ -909,9 +1019,115 @@ function setupRecipesView() {
     $('randomRecipeBtn').onclick = () => suggestRandomRecipe();
     $('openAddRecipeBtn').onclick = () => {
         renderCategorySelects();
+        $('importStatus').textContent = '';
         openModalEl('addRecipeModal');
-        $('newRecipeTitle').focus();
+        $('importUrl').focus();
     };
+    $('openFridgeBtn').onclick = () => {
+        openModalEl('fridgeModal');
+        $('fridgeInput').focus();
+    };
+    $('fridgeForm').addEventListener('submit', (e) => {
+        e.preventDefault();
+        searchFridge().catch(err => {
+            $('fridgeResults').innerHTML = '<p class="hint">No se pudo buscar. Revisa la conexión.</p>';
+            console.error(err);
+        });
+    });
+}
+
+// -------------------- ¿QUÉ HAY EN LA NEVERA? --------------------
+// Recetas que usan lo que tienes, ordenadas por lo poco que te falta. Lo básico de
+// despensa no cuenta como "falta".
+
+const BASICOS_DESPENSA = new RegExp('^(sal|sal gruesa|sal fina|pimienta( negra| blanca)?|aceite|agua|vinagre|azucar|ajo|' +
+    'especia|oregano|comino|pimenton|perejil|laurel|tomillo|romero|canela|nuez moscada|curry|colorante|azafran|' +
+    'hielo|cubito de hielo|caldo|pastilla de caldo|edulcorante|levadura|bicarbonato|harina|maicena|mantequilla|' +
+    'aceite de oliva|aceite de girasol|aceite vegetal|sal y pimienta|pimienta y sal)\\b');
+let fridgeMissing = {}; // id receta -> ingredientes que faltan (para "Añadir lo que falta")
+
+function fridgeItems(text) {
+    return [...new Set(text.split(/,|\s+y\s+|\n/).map(t => shoppingKey(t)).filter(k => k.length > 1))].slice(0, 6);
+}
+
+// Puntúa una receta. Pura: se puede probar sin red.
+function scoreFridgeRecipe(recipe, items) {
+    const lines = parseIngredients(recipe.ingredients);
+    const titleKey = ' ' + shoppingKey(recipe.title) + ' ';
+    const used = new Set();
+    const missing = [];
+    lines.forEach(line => {
+        const key = ' ' + shoppingKey(line) + ' ';
+        const hits = items.filter(it => key.includes(' ' + it + ' ') || key.includes(' ' + it));
+        if (hits.length) hits.forEach(h => used.add(h));
+        else if (!BASICOS_DESPENSA.test(key.trim()) && !/\b(opcional|a gusto|al gusto)\b/i.test(line)) missing.push(line);
+    });
+    items.forEach(it => { if (titleKey.includes(' ' + it)) used.add(it); });
+    return {
+        recipe,
+        used: items.filter(it => used.has(it)),
+        missing,
+        inTitle: items.filter(it => titleKey.includes(' ' + it)).length,
+        total: lines.length
+    };
+}
+
+function rankFridge(recipes, items) {
+    return recipes
+        .map(r => scoreFridgeRecipe(r, items))
+        .filter(s => s.total > 0 && s.used.length > 0)
+        .sort((a, b) => b.used.length - a.used.length || a.missing.length - b.missing.length ||
+            b.inTitle - a.inTitle || a.total - b.total);
+}
+
+async function searchFridge() {
+    const items = fridgeItems($('fridgeInput').value);
+    const box = $('fridgeResults');
+    if (items.length === 0) {
+        box.innerHTML = '<p class="hint">Escribe al menos un ingrediente.</p>';
+        return;
+    }
+    box.innerHTML = '<p class="hint">Buscando…</p>';
+    const query = (subset, limit) => {
+        const p = applyCatalogFilters(new URLSearchParams({ select: 'id,title,categoria,ingredients', limit: String(limit) }),
+            { tipos: ['principal'] });
+        subset.forEach(it => p.append('ingredients', 'imatch.' + accentInsensitivePattern(it)));
+        return supabaseRequest('recetas', '?' + p).then(d => d || []);
+    };
+    // Primero las que llevan todo; si salen pocas, también las que llevan alguno.
+    let found = await query(items, 300);
+    if (found.length < 25 && items.length > 1) {
+        const extra = await Promise.all(items.map(it => query([it], 120)));
+        const seen = new Set(found.map(r => r.id));
+        extra.flat().forEach(r => { if (!seen.has(r.id)) { seen.add(r.id); found.push(r); } });
+    }
+    const ranked = rankFridge(found, items).slice(0, 30);
+    fridgeMissing = {};
+    if (ranked.length === 0) {
+        box.innerHTML = '<p class="hint">No he encontrado recetas con eso. Prueba con menos ingredientes o con otro nombre (p. ej. «patata» en vez de «papas»).</p>';
+        return;
+    }
+    box.innerHTML = `<p class="hint">${ranked.length} ideas, primero las que usan más de lo que tienes y piden menos compra.</p>` +
+        ranked.map(s => {
+            fridgeMissing[s.recipe.id] = s.missing;
+            const faltan = s.missing.map(l => ingredientParts(l).nombre || l);
+            return `<article class="fridge-item">` +
+                `<button class="fridge-title" type="button" data-action="open-recipe" data-id="${s.recipe.id}">${isFavorite(s.recipe.id) ? '⭐ ' : ''}${escapeHtml(s.recipe.title)}</button>` +
+                `<small class="badge">${escapeHtml(categoryName(s.recipe.categoria))}</small>` +
+                `<p class="fridge-uses">✅ Usa: ${escapeHtml(s.used.join(', '))}</p>` +
+                (faltan.length
+                    ? `<p class="fridge-missing">🛒 Te falta: ${escapeHtml(faltan.join(', '))}</p>` +
+                      `<button class="link-btn" type="button" data-action="fridge-add-missing" data-id="${s.recipe.id}">+ Añadir lo que falta a la lista</button>`
+                    : '<p class="fridge-missing ok">🎉 ¡Tienes todo lo necesario!</p>') +
+                `</article>`;
+        }).join('');
+}
+
+async function addFridgeMissing(id) {
+    const lines = fridgeMissing[id] || [];
+    if (lines.length === 0) return;
+    await addShoppingTexts(lines.map(ingredientListName));
+    showToast(`🛒 ${lines.length} ${lines.length === 1 ? 'ingrediente añadido' : 'ingredientes añadidos'} a la lista`);
 }
 
 function renderScopeFilters() {
@@ -1274,7 +1490,74 @@ async function refreshAfterRecipeChange() {
 
 // -------------------- AÑADIR RECETA --------------------
 
+// -------------------- IMPORTAR DESDE UNA WEB --------------------
+// La Edge Function supabase/functions/importar-receta lee la página (el navegador no
+// puede, por CORS) y devuelve título, ingredientes y pasos para revisar antes de guardar.
+
+async function importRecipeFromUrl() {
+    const url = $('importUrl').value.trim();
+    const status = $('importStatus');
+    if (!/^https?:\/\/\S+\.\S+/i.test(url)) {
+        status.textContent = 'Pega un enlace completo, que empiece por https://';
+        return;
+    }
+    // ¿Ya la tenemos? (las 18.000 importadas vienen de recetasgratis y recetas.com)
+    try {
+        const existing = await supabaseRequest('recetas', `?select=id,title&url=eq.${encodeURIComponent(url)}&limit=1`);
+        if (existing && existing[0]) {
+            status.textContent = '';
+            closeModalEl('addRecipeModal');
+            showToast(`Ya la teníais: «${existing[0].title}»`);
+            randomMode = false;
+            return openRecipe(existing[0].id);
+        }
+    } catch { /* si falla la comprobación, se importa igualmente */ }
+
+    const btn = $('importUrlBtn');
+    btn.disabled = true;
+    btn.textContent = 'Leyendo…';
+    status.textContent = '⏳ Leyendo la receta de la web…';
+    try {
+        const token = await getAccessToken();
+        const response = await fetch(`${SUPABASE_URL}/functions/v1/importar-receta`, {
+            method: 'POST',
+            headers: { apikey: SUPABASE_KEY, Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url })
+        });
+        const data = await response.json().catch(() => ({}));
+        if (response.status === 404 && !data.error) {
+            status.textContent = '⚠️ La importación aún no está activada en Supabase (falta desplegar la función «importar-receta»).';
+            return;
+        }
+        if (!response.ok) {
+            status.textContent = `⚠️ ${data.error || 'No se pudo leer esa web'}. Puedes copiar la receta a mano abajo.`;
+            if (data.title && !$('newRecipeTitle').value) $('newRecipeTitle').value = data.title;
+            $('newRecipeUrl').value = url;
+            return;
+        }
+        $('newRecipeTitle').value = data.title || '';
+        $('newRecipeUrl').value = data.url || url;
+        $('newRecipeIngredients').value = (data.ingredients || []).join('\n');
+        $('newRecipeSteps').value = (data.steps || []).join('\n');
+        const n = (data.ingredients || []).length;
+        status.textContent = `✅ ${n} ingredientes y ${(data.steps || []).length} pasos. Revisa, elige la categoría y guarda.`;
+        $('newRecipeCategory').focus();
+    } catch (e) {
+        status.textContent = '⚠️ No se pudo conectar: ' + e.message;
+    } finally {
+        btn.disabled = false;
+        btn.textContent = 'Importar';
+    }
+}
+
 function setupAddRecipeModal() {
+    $('importUrlBtn').onclick = () => importRecipeFromUrl();
+    $('importUrl').addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            importRecipeFromUrl();
+        }
+    });
     $('addRecipeForm').addEventListener('submit', async (e) => {
         e.preventDefault();
         const title = $('newRecipeTitle').value.trim();
@@ -1290,6 +1573,8 @@ function setupAddRecipeModal() {
         try {
             const inserted = await supabaseRequest('recetas', '', { method: 'POST', body: JSON.stringify([row]) });
             e.target.reset();
+            $('importUrl').value = '';
+            $('importStatus').textContent = '';
             closeModalEl('addRecipeModal');
             showToast('Receta guardada');
             if (schema.propia) setScope('propias');
@@ -1343,6 +1628,11 @@ function setupShoppingView() {
             .catch(showShoppingError);
     });
     $('shoppingInput').addEventListener('input', renderSuggestions);
+    $('editHabitualBtn').onclick = () => {
+        habitualEditMode = !habitualEditMode;
+        renderHabituales();
+    };
+    $('addFixedBtn').onclick = () => addFixedHabituales().catch(showShoppingError);
     $('clearCheckedBtn').onclick = () => clearCheckedItems().catch(showShoppingError);
     $('clearListBtn').onclick = () => {
         if (shoppingList.length === 0) return showToast('La lista ya está vacía');
@@ -1405,6 +1695,7 @@ function renderShoppingList() {
             (done.length ? header('✅ En el carro') + done.map(itemHtml).join('') : '');
     }
     $('clearCheckedBtn').hidden = done.length === 0;
+    renderHabituales();
 }
 
 // Pasillos del súper, en el orden en que se suelen recorrer. Se comprueban de arriba abajo:
@@ -1488,6 +1779,7 @@ async function addProductById(id) {
     const match = $('shoppingInput').value.trim().match(/^(\d+)\s*[x×]?\s+/i);
     await addProductToList(product, match ? Number(match[1]) : 1);
     await loadShoppingList();
+    recordHabitual(product.nombre);
     $('shoppingInput').value = '';
     renderSuggestions();
     $('shoppingInput').focus();
@@ -1518,7 +1810,127 @@ async function addShoppingFromInput(text) {
         name = m[2].trim();
     }
     await addShoppingTexts([name], qty);
+    recordHabitual(name);
     showToast(`🛒 ${name} añadido`);
+}
+
+// -------------------- LO DE SIEMPRE --------------------
+// Lo que se añade a mano a la lista se cuenta en compra_habitual; los más repetidos y
+// los fijos (📌) salen como botones para añadirlos con un toque. Lo que llega desde
+// los ingredientes de una receta no cuenta (son compras puntuales).
+
+async function loadHabituales() {
+    if (!schema.habituales) return;
+    try {
+        habituales = await supabaseRequest('compra_habitual', '?select=clave,nombre,veces,fijo,ultima_vez') || [];
+    } catch (e) {
+        console.warn('No se pudo cargar «Lo de siempre»:', e);
+    }
+}
+
+function habitualByClave(clave) {
+    return habituales.find(h => h.clave === clave);
+}
+
+function recordHabitual(name) {
+    if (!schema.habituales) return;
+    const clave = shoppingKey(name);
+    if (!clave) return;
+    const existing = habitualByClave(clave);
+    const row = {
+        clave,
+        nombre: existing ? existing.nombre : (ingredientParts(name).nombre || name),
+        veces: (existing ? existing.veces : 0) + 1,
+        ultima_vez: new Date().toISOString()
+    };
+    if (existing) Object.assign(existing, row);
+    else habituales.push({ ...row, fijo: false });
+    renderHabituales();
+    // upsert: si ya existe se actualizan veces/ultima_vez y se respeta "fijo"
+    supabaseRequest('compra_habitual', '?on_conflict=clave', {
+        method: 'POST',
+        headers: { Prefer: 'return=minimal,resolution=merge-duplicates' },
+        body: JSON.stringify([row])
+    }).catch(e => console.warn('No se pudo guardar en «Lo de siempre»:', e));
+}
+
+function sortedHabituales() {
+    return [...habituales].sort((a, b) =>
+        Number(b.fijo) - Number(a.fijo) || b.veces - a.veces ||
+        String(b.ultima_vez || '').localeCompare(String(a.ultima_vez || '')));
+}
+
+function pendingShoppingKeys() {
+    return new Set(shoppingList.filter(i => !i.comprado).map(i => shoppingKey(i.nombre)));
+}
+
+function renderHabituales() {
+    const box = $('habitualBox');
+    if (!box) return;
+    box.hidden = !schema.habituales || habituales.length === 0;
+    if (box.hidden) return;
+    const pending = pendingShoppingKeys();
+    const chips = $('habitualChips');
+    $('habitualHint').hidden = !habitualEditMode;
+    $('editHabitualBtn').textContent = habitualEditMode ? '✓ Listo' : '✏️ Editar';
+
+    if (habitualEditMode) {
+        chips.innerHTML = sortedHabituales().map(h =>
+            `<span class="habitual-chip editing${h.fijo ? ' fijo' : ''}">` +
+            `<button type="button" data-action="habitual-pin" data-clave="${escapeHtml(h.clave)}" aria-pressed="${h.fijo}" ` +
+            `aria-label="${h.fijo ? 'Quitar de fijos' : 'Marcar como fijo'}: ${escapeHtml(h.nombre)}">${h.fijo ? '📌' : '📍'}</button>` +
+            `<span>${escapeHtml(h.nombre)}</span>` +
+            `<button type="button" data-action="habitual-forget" data-clave="${escapeHtml(h.clave)}" aria-label="Olvidar ${escapeHtml(h.nombre)}">×</button></span>`
+        ).join('');
+        $('addFixedBtn').hidden = true;
+        return;
+    }
+
+    const visible = sortedHabituales().filter(h => !pending.has(h.clave)).slice(0, 18);
+    chips.innerHTML = visible.length
+        ? visible.map(h =>
+            `<button type="button" class="habitual-chip${h.fijo ? ' fijo' : ''}" data-action="habitual-add" data-clave="${escapeHtml(h.clave)}">` +
+            `${h.fijo ? '📌 ' : '+ '}${escapeHtml(h.nombre)}</button>`).join('')
+        : '<p class="hint">Ya está todo en la lista 👌</p>';
+    const fixedMissing = habituales.filter(h => h.fijo && !pending.has(h.clave));
+    $('addFixedBtn').hidden = fixedMissing.length === 0;
+    $('addFixedBtn').textContent = `📌 Añadir los fijos (${fixedMissing.length})`;
+}
+
+async function addHabitual(clave) {
+    const h = habitualByClave(clave);
+    if (!h) return;
+    await addShoppingTexts([h.nombre]);
+    recordHabitual(h.nombre);
+    showToast(`🛒 ${h.nombre} añadido`);
+}
+
+async function addFixedHabituales() {
+    const pending = pendingShoppingKeys();
+    const missing = habituales.filter(h => h.fijo && !pending.has(h.clave));
+    if (missing.length === 0) return;
+    await addShoppingTexts(missing.map(h => h.nombre));
+    missing.forEach(h => recordHabitual(h.nombre));
+    showToast(`📌 ${missing.length} ${missing.length === 1 ? 'producto fijo añadido' : 'productos fijos añadidos'}`);
+}
+
+async function toggleHabitualFijo(clave) {
+    const h = habitualByClave(clave);
+    if (!h) return;
+    const fijo = !h.fijo;
+    await supabaseRequest('compra_habitual', `?clave=eq.${encodeURIComponent(clave)}`, {
+        method: 'PATCH', headers: { Prefer: 'return=minimal' }, body: JSON.stringify({ fijo })
+    });
+    h.fijo = fijo;
+    renderHabituales();
+}
+
+async function forgetHabitual(clave) {
+    await supabaseRequest('compra_habitual', `?clave=eq.${encodeURIComponent(clave)}`, {
+        method: 'DELETE', headers: { Prefer: 'return=minimal' }
+    });
+    habituales = habituales.filter(h => h.clave !== clave);
+    renderHabituales();
 }
 
 // Las altas en la lista van en cola: si dos se solapan (doble toque), ambas calcularían
@@ -1537,14 +1949,15 @@ async function addShoppingTextsNow(texts, qty) {
     for (const raw of texts) {
         const name = raw.trim();
         if (!name) continue;
-        const key = normalizeText(name);
-        const product = products.find(p => normalizeText(p.nombre) === key);
+        // Misma clave = mismo producto: "2 tomates", "Tomate" y "Tomates (500 g)" se juntan.
+        const key = shoppingKey(name);
+        const product = products.find(p => shoppingKey(p.nombre) === key);
         if (product) {
             await addProductToList(product, qty);
             await loadShoppingList();
             continue;
         }
-        const existing = shoppingList.find(i => !i.comprado && normalizeText(i.nombre) === key);
+        const existing = shoppingList.find(i => !i.comprado && shoppingKey(i.nombre) === key);
         if (existing) {
             await supabaseRequest('lista_compra', `?id=eq.${existing.id}`, {
                 method: 'PATCH',
@@ -1883,6 +2296,19 @@ document.addEventListener('visibilitychange', () => {
     lastBackgroundSync = Date.now();
     loadShoppingList().catch(e => console.warn('No se pudo actualizar la lista:', e));
     loadCurrentWeekMenuDraft({ keepOnError: true }).then(renderWeek);
+    // Categorías y favoritas también: si la app se abrió sin acceso (o sin red) se
+    // habían quedado vacías y no se volvían a pedir.
+    Promise.all([
+        loadCategories().catch(e => console.warn('No se pudieron actualizar las categorías:', e)),
+        loadFavorites(),
+        loadHabituales()
+    ]).then(() => {
+        renderCategoryFilters();
+        renderCategorySelects();
+        renderScopeFilters();
+        renderHabituales();
+        renderRecipes(); // los nombres de categoría de las tarjetas
+    });
 });
 
 // -------------------- CONFIRMACIÓN --------------------

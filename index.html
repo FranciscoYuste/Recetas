@@ -58,6 +58,7 @@
                 <h2 id="recetasTitle">Recetas</h2>
                 <div class="view-head-actions">
                     <button id="randomRecipeBtn" class="btn btn-primary" type="button">🎲 ¿Qué cocino hoy?</button>
+                    <button id="openFridgeBtn" class="btn btn-secondary" type="button">🧊 ¿Qué hay en la nevera?</button>
                     <button id="openAddRecipeBtn" class="btn btn-secondary" type="button">➕ Nueva</button>
                 </div>
             </div>
@@ -91,6 +92,18 @@
                 <button type="submit" class="btn btn-primary">Añadir</button>
             </form>
             <div id="shoppingSuggestions" class="shopping-suggestions"></div>
+
+            <section id="habitualBox" class="habitual-box" hidden aria-labelledby="habitualTitle">
+                <div class="habitual-head">
+                    <h3 id="habitualTitle">⚡ Lo de siempre</h3>
+                    <div class="habitual-actions">
+                        <button id="addFixedBtn" class="btn btn-primary btn-small" type="button" hidden></button>
+                        <button id="editHabitualBtn" class="link-btn" type="button">✏️ Editar</button>
+                    </div>
+                </div>
+                <p id="habitualHint" class="hint habitual-hint" hidden>Toca 📌 para marcarlo como fijo (se añaden todos los fijos con un botón) o × para olvidarlo.</p>
+                <div id="habitualChips" class="habitual-chips"></div>
+            </section>
 
             <ul id="shoppingList" class="shopping-list"></ul>
 
@@ -245,6 +258,14 @@
         <div class="modal-content">
             <button class="close-btn" data-close="addRecipeModal" type="button" aria-label="Cerrar">&times;</button>
             <h2>➕ Nueva receta</h2>
+            <div class="import-panel">
+                <label for="importUrl">🔗 ¿La has visto en una web? Pega el enlace</label>
+                <div class="weekly-add-row">
+                    <input type="url" id="importUrl" placeholder="https://www.recetasgratis.net/..." inputmode="url" autocomplete="off">
+                    <button id="importUrlBtn" class="btn btn-primary" type="button">Importar</button>
+                </div>
+                <p id="importStatus" class="hint import-status" role="status" aria-live="polite"></p>
+            </div>
             <form id="addRecipeForm" class="admin-form">
                 <label for="newRecipeTitle">Título</label>
                 <input type="text" id="newRecipeTitle" required>
@@ -263,6 +284,20 @@
 
                 <button type="submit" class="btn btn-primary">Guardar receta</button>
             </form>
+        </div>
+    </div>
+
+    <!-- ¿Qué hay en la nevera? -->
+    <div id="fridgeModal" class="modal">
+        <div class="modal-content">
+            <button class="close-btn" data-close="fridgeModal" type="button" aria-label="Cerrar">&times;</button>
+            <h2>🧊 ¿Qué hay en la nevera?</h2>
+            <p class="hint">Escribe lo que tienes, separado por comas. La sal, el aceite, el agua, el ajo y las especias se dan por hechos.</p>
+            <form id="fridgeForm" class="weekly-add-row" autocomplete="off">
+                <input type="search" id="fridgeInput" placeholder="pollo, pimiento, arroz" enterkeyhint="search" aria-label="Ingredientes que tienes">
+                <button type="submit" class="btn btn-primary">Buscar</button>
+            </form>
+            <div id="fridgeResults" class="fridge-results"></div>
         </div>
     </div>
 
