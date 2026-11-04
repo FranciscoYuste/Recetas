@@ -20,6 +20,11 @@ const TIPOS_COMIDA = ['Comida', 'Cena'];
 const VIEWS = ['semana', 'recetas', 'compra'];
 const RECIPES_PAGE_SIZE = 60;
 const LOCAL_CHECKED_KEY = 'recetario.comprados';
+const SESSION_KEY = 'recetario.sesion';
+
+let session = null;        // {access_token, refresh_token, expires_at, email}
+let refreshPromise = null; // renovación en curso (para no pedirla dos veces a la vez)
+let appStarted = false;
 
 let schema = { shoppingExtras: false, menuFecha: false, propia: false };
 
@@ -80,7 +85,17 @@ document.addEventListener('DOMContentLoaded', async () => {
     setupProductManagerModal();
     setupConfirmModal();
     setupBackToTop();
+    setupLogin();
 
+    session = readSession();
+    if (session) startApp();
+    else showLogin();
+});
+
+// Carga inicial de datos. Solo se ejecuta con sesión iniciada.
+async function startApp() {
+    if (appStarted) return;
+    appStarted = true;
     $('weeklyGrid').innerHTML = '<p class="hint">Cargando…</p>';
     try {
         await detectSchema();
@@ -100,7 +115,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         loadCurrentWeekMenuDraft().then(renderWeek),
         loadShoppingList().catch(showShoppingError)
     ]);
-});
+}
 
 async function detectSchema() {
     const probe = (table, cols) => supabaseRequest(table, `?select=${cols}&limit=1`).then(() => true, () => false);
@@ -117,14 +132,159 @@ async function detectSchema() {
     }
 }
 
-// -------------------- SUPABASE --------------------
+// -------------------- SESIÓN (Supabase Auth) --------------------
+// Login con email y contraseña contra /auth/v1. La sesión (access + refresh token)
+// se guarda en localStorage para no tener que entrar cada vez. Las tablas tienen RLS
+// y solo dejan pasar a usuarios autenticados (ver supabase/seguridad_rls.sql).
 
-async function supabaseRequest(table, query = '', options = {}) {
-    const response = await fetch(`${SUPABASE_URL}/rest/v1/${table}${query}`, {
-        ...options,
+function readSession() {
+    try { return JSON.parse(localStorage.getItem(SESSION_KEY)) || null; } catch { return null; }
+}
+
+function writeSession(value) {
+    session = value;
+    try {
+        if (value) localStorage.setItem(SESSION_KEY, JSON.stringify(value));
+        else localStorage.removeItem(SESSION_KEY);
+    } catch { /* sin localStorage la sesión dura lo que la pestaña */ }
+}
+
+function sessionFromAuth(data) {
+    return {
+        access_token: data.access_token,
+        refresh_token: data.refresh_token,
+        expires_at: data.expires_at || Math.floor(Date.now() / 1000) + (data.expires_in || 3600),
+        email: data.user?.email || session?.email || ''
+    };
+}
+
+async function authRequest(path, body, token) {
+    const response = await fetch(`${SUPABASE_URL}/auth/v1/${path}`, {
+        method: 'POST',
         headers: {
             apikey: SUPABASE_KEY,
-            Authorization: 'Bearer ' + SUPABASE_KEY,
+            'Content-Type': 'application/json',
+            ...(token ? { Authorization: 'Bearer ' + token } : {})
+        },
+        body: JSON.stringify(body || {})
+    });
+    const text = await response.text();
+    let data = null;
+    try { data = text ? JSON.parse(text) : null; } catch { /* respuesta vacía o no JSON */ }
+    if (!response.ok) {
+        const err = new Error(data?.msg || data?.error_description || data?.message || `Error ${response.status}`);
+        err.status = response.status;
+        err.code = data?.error_code || data?.error;
+        throw err;
+    }
+    return data;
+}
+
+function refreshSession() {
+    if (!refreshPromise) {
+        refreshPromise = authRequest('token?grant_type=refresh_token', { refresh_token: session.refresh_token })
+            .then(data => writeSession(sessionFromAuth(data)))
+            .catch(err => {
+                // Con status es que Supabase ha rechazado el token; sin él, fallo de red (no cerrar sesión).
+                if (err.status) sessionExpired();
+                throw err;
+            })
+            .finally(() => { refreshPromise = null; });
+    }
+    return refreshPromise;
+}
+
+async function getAccessToken() {
+    const stored = readSession();
+    if (stored) session = stored; // por si otra pestaña ya renovó el token
+    if (!session) {
+        showLogin();
+        throw new Error('Sesión no iniciada');
+    }
+    if (session.expires_at - 60 > Date.now() / 1000) return session.access_token;
+    await refreshSession();
+    return session.access_token;
+}
+
+function sessionExpired() {
+    writeSession(null);
+    showLogin('Tu sesión ha caducado. Vuelve a entrar.');
+}
+
+function setupLogin() {
+    $('loginForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const btn = $('loginSubmit');
+        const error = $('loginError');
+        error.hidden = true;
+        btn.disabled = true;
+        btn.textContent = 'Entrando…';
+        try {
+            const data = await authRequest('token?grant_type=password', {
+                email: $('loginEmail').value.trim(),
+                password: $('loginPassword').value
+            });
+            writeSession(sessionFromAuth(data));
+            $('loginPassword').value = '';
+            if (appStarted) {
+                // La sesión caducó con la app ya cargada: recargar para traer todo de nuevo.
+                location.reload();
+                return;
+            }
+            $('loginScreen').hidden = true;
+            startApp();
+        } catch (err) {
+            error.textContent = err.code === 'invalid_credentials' || err.status === 400
+                ? 'Email o contraseña incorrectos.'
+                : 'No se pudo iniciar sesión: ' + err.message;
+            error.hidden = false;
+        } finally {
+            btn.disabled = false;
+            btn.textContent = 'Entrar';
+        }
+    });
+
+    $('logoutBtn').addEventListener('click', () => {
+        askConfirm('¿Cerrar la sesión en este dispositivo?', 'Cerrar sesión', async () => {
+            const token = session?.access_token;
+            writeSession(null);
+            if (token) await authRequest('logout', {}, token).catch(() => {});
+            location.reload();
+        }, { danger: false });
+    });
+}
+
+function showLogin(message) {
+    const screen = $('loginScreen');
+    if (!screen) return;
+    const error = $('loginError');
+    error.hidden = !message;
+    error.textContent = message || '';
+    if (session?.email || readSession()?.email) $('loginEmail').value = session?.email || readSession().email;
+    screen.hidden = false;
+    $(($('loginEmail').value ? 'loginPassword' : 'loginEmail')).focus();
+}
+
+// -------------------- SUPABASE --------------------
+
+// fetch a PostgREST con el token de la sesión; si caduca a mitad (401) renueva y reintenta una vez.
+async function supabaseFetch(url, options = {}, retry = true) {
+    const token = await getAccessToken();
+    const response = await fetch(url, {
+        ...options,
+        headers: { apikey: SUPABASE_KEY, Authorization: 'Bearer ' + token, ...(options.headers || {}) }
+    });
+    if (response.status === 401 && retry) {
+        await refreshSession();
+        return supabaseFetch(url, options, false);
+    }
+    return response;
+}
+
+async function supabaseRequest(table, query = '', options = {}) {
+    const response = await supabaseFetch(`${SUPABASE_URL}/rest/v1/${table}${query}`, {
+        ...options,
+        headers: {
             'Content-Type': 'application/json',
             Prefer: 'return=representation',
             ...(options.headers || {})
@@ -141,8 +301,8 @@ async function supabaseRequest(table, query = '', options = {}) {
 
 // Devuelve filas + total (cabecera Content-Range) para paginar.
 async function supabaseCount(table, params) {
-    const response = await fetch(`${SUPABASE_URL}/rest/v1/${table}?${params}`, {
-        headers: { apikey: SUPABASE_KEY, Authorization: 'Bearer ' + SUPABASE_KEY, Prefer: 'count=exact' }
+    const response = await supabaseFetch(`${SUPABASE_URL}/rest/v1/${table}?${params}`, {
+        headers: { Prefer: 'count=exact' }
     });
     if (!response.ok) throw new Error(`Supabase (${table}) respondió con ${response.status}`);
     const rows = await response.json();

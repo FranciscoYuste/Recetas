@@ -104,6 +104,21 @@
 
     <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 
+    <!-- ============ LOGIN ============ -->
+    <div id="loginScreen" class="login-screen" hidden>
+        <form id="loginForm" class="login-card" autocomplete="on">
+            <img src="img/icon-192.png" alt="" width="72" height="72" class="login-icon">
+            <h2>Recetas Fran y Mónica</h2>
+            <p class="hint">Inicia sesión para ver y editar las recetas.</p>
+            <label for="loginEmail">Email</label>
+            <input id="loginEmail" name="email" type="email" autocomplete="username" required>
+            <label for="loginPassword">Contraseña</label>
+            <input id="loginPassword" name="password" type="password" autocomplete="current-password" required>
+            <p id="loginError" class="login-error" role="alert" hidden></p>
+            <button id="loginSubmit" class="btn btn-primary" type="submit">Entrar</button>
+        </form>
+    </div>
+
     <!-- ============ MODALES ============ -->
 
     <!-- Ajustes / más opciones -->
@@ -116,6 +131,7 @@
                 <button id="openCategoryManagerBtn" class="settings-item" type="button">🏷️ Categorías</button>
                 <button id="openProductManagerBtn" class="settings-item" type="button">🛠️ Productos de la compra</button>
                 <button id="installAppBtn" class="settings-item" type="button" hidden>📲 Instalar la app</button>
+                <button id="logoutBtn" class="settings-item" type="button">🚪 Cerrar sesión</button>
             </div>
             <p id="installHint" class="hint install-hint">📲 <strong>Tenla en el móvil como una app:</strong><br>
                 iPhone: Safari → Compartir → «Añadir a pantalla de inicio».<br>
