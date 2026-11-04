@@ -28,7 +28,25 @@ body {
     background: var(--bg);
     color: var(--text);
     margin: 0;
+    /* en horizontal, el notch del iPhone queda a un lado */
+    padding-left: env(safe-area-inset-left);
+    padding-right: env(safe-area-inset-right);
     -webkit-tap-highlight-color: transparent;
+}
+
+/* Franja fija bajo la hora/wifi/batería: si el iPhone aún usa la barra translúcida
+   (app instalada antes del cambio), el contenido no se ve ni queda debajo al hacer scroll.
+   Con la barra opaca mide 0 y no hace nada. */
+body::before {
+    content: '';
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 1300;
+    height: env(safe-area-inset-top);
+    background: var(--bg);
+    pointer-events: none;
 }
 
 button,
@@ -94,7 +112,7 @@ h2 {
 
 .tabs {
     position: sticky;
-    top: 0;
+    top: env(safe-area-inset-top);
     z-index: 800;
     display: flex;
     justify-content: center;
@@ -1130,7 +1148,7 @@ textarea:focus {
         right: 0;
         gap: 0;
         margin: 0;
-        padding: 6px 4px calc(6px + env(safe-area-inset-bottom));
+        padding: 6px calc(4px + env(safe-area-inset-right)) calc(6px + env(safe-area-inset-bottom)) calc(4px + env(safe-area-inset-left));
         border-top: 1px solid var(--gold-border);
         border-bottom: none;
     }
