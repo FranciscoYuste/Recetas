@@ -1,0 +1,6 @@
+{
+  "type": "module",
+  "private": true,
+  "description": "Sin dependencias: solo para que Node trate js/ como módulos al ejecutar las pruebas.",
+  "scripts": { "test": "node --test \"tests/*.test.mjs\"" }
+}
